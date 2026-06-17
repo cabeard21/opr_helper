@@ -1,0 +1,6 @@
+[submodule "refs/40k_Army_builder"]
+	path = refs/40k_Army_builder
+	url = https://github.com/cabeard21/40k_Army_Builder.git
+[submodule "refs/pyhammer"]
+	path = refs/pyhammer
+	url = https://github.com/matthra/pyhammer.git
