@@ -70,13 +70,13 @@ def _sync_book(book: dict[str, Any], fallback: dict[str, Any]) -> dict[str, int]
         unit = _upsert_unit(faction, unit_kwargs)
         summary["units"] += 1
 
-        for raw_weapon in _weapons(raw_unit):
+        for raw_weapon, is_default, upgrade_cost in _weapon_options(raw_unit):
             weapon_kwargs = parse_weapon(raw_weapon)
             weapon = _upsert_weapon(weapon_kwargs)
             UnitWeaponSlot.objects.update_or_create(
                 unit=unit,
                 weapon=weapon,
-                defaults={"is_default": True, "upgrade_cost": 0},
+                defaults={"is_default": is_default, "upgrade_cost": upgrade_cost},
             )
             summary["weapons"] += 1
             summary["slots"] += 1
@@ -127,3 +127,31 @@ def _units(book: dict[str, Any]) -> list[dict[str, Any]]:
 
 def _weapons(unit: dict[str, Any]) -> list[dict[str, Any]]:
     return unit.get("weapons") or unit.get("loadout") or []
+
+
+def _weapon_options(unit: dict[str, Any]) -> list[tuple[dict[str, Any], bool, int]]:
+    options = [(weapon, True, 0) for weapon in _weapons(unit)]
+    for upgrade in _upgrades(unit):
+        upgrade_cost = _upgrade_cost(upgrade)
+        for weapon in _weapons(upgrade):
+            options.append((weapon, bool(upgrade.get("isDefault", False)), upgrade_cost))
+    return options
+
+
+def _upgrades(unit: dict[str, Any]) -> list[dict[str, Any]]:
+    upgrades = unit.get("upgrades") or unit.get("upgradePackages") or unit.get("options") or []
+    return [upgrade for upgrade in upgrades if isinstance(upgrade, dict)]
+
+
+def _upgrade_cost(upgrade: dict[str, Any]) -> int:
+    raw_cost = (
+        upgrade.get("upgrade_cost")
+        or upgrade.get("upgradeCost")
+        or upgrade.get("cost")
+        or upgrade.get("points")
+        or 0
+    )
+    try:
+        return int(raw_cost)
+    except (TypeError, ValueError):
+        return 0

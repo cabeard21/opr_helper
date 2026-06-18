@@ -26,6 +26,9 @@ class Unit(models.Model):
     defense = models.PositiveSmallIntegerField()
     tough = models.PositiveSmallIntegerField()
     points = models.PositiveIntegerField()
+    min_models = models.PositiveIntegerField(default=1)
+    max_models = models.PositiveIntegerField(null=True, blank=True)
+    default_models = models.PositiveIntegerField(default=1)
     special_rules = models.JSONField(default=dict, blank=True)
     source_uid = models.CharField(max_length=120, null=True, blank=True, db_index=True)
 

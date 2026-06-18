@@ -4,6 +4,7 @@ from rest_framework import status
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
+from lists.analysis import analyze_army_list, validate_targets
 from lists.models import ArmyList, ListUnit
 from lists.serializers import AddListUnitSerializer, ArmyListSerializer, ListUnitSerializer
 
@@ -15,6 +16,7 @@ def envelope(data=None, error=None, status_code=status.HTTP_200_OK):
 def _list_queryset():
     return ArmyList.objects.select_related("faction").prefetch_related(
         "units__unit",
+        "units__unit__weapon_slots__weapon",
         "units__selected_weapon_slot__weapon",
     )
 
@@ -102,3 +104,17 @@ def remove_list_unit(request, list_id: int, list_unit_id: int):
 
     list_unit.delete()
     return envelope(ArmyListSerializer(_list_queryset().get(id=army_list.id)).data)
+
+
+@api_view(["POST"])
+def army_list_analysis(request, list_id: int):
+    try:
+        army_list = _list_queryset().get(id=list_id)
+    except ArmyList.DoesNotExist:
+        return envelope(None, "Army list not found.", status.HTTP_404_NOT_FOUND)
+
+    targets, error = validate_targets(request.data.get("targets"))
+    if error:
+        return envelope(None, error, status.HTTP_400_BAD_REQUEST)
+
+    return envelope(analyze_army_list(army_list, targets))

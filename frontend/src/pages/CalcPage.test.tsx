@@ -45,6 +45,9 @@ const paladins: Unit = {
   defense: 4,
   tough: 3,
   points: 180,
+  min_models: 1,
+  max_models: null,
+  default_models: 1,
   special_rules: { Fearless: true },
   source_uid: 'unit-10',
   weapon_slots: [

@@ -2,6 +2,7 @@ from rest_framework import serializers
 
 from army_books.models import UnitWeaponSlot
 from lists.models import ArmyList, ListUnit
+from lists.validation import army_list_points, army_list_validation, list_unit_points, validate_model_count
 
 
 class ListUnitSerializer(serializers.ModelSerializer):
@@ -29,19 +30,25 @@ class ListUnitSerializer(serializers.ModelSerializer):
         )
 
     def get_total_points(self, obj):
-        return obj.unit.points * obj.model_count
+        return list_unit_points(obj)
 
     def validate(self, attrs):
         unit = attrs.get("unit") or getattr(self.instance, "unit", None)
         slot = attrs.get("selected_weapon_slot")
         if slot and unit and slot.unit_id != unit.id:
             raise serializers.ValidationError("Selected weapon slot must belong to the unit.")
+        model_count = attrs.get("model_count", getattr(self.instance, "model_count", None))
+        if unit and model_count is not None:
+            model_error = validate_model_count(unit, model_count)
+            if model_error:
+                raise serializers.ValidationError({"model_count": model_error})
         return attrs
 
 
 class ArmyListSerializer(serializers.ModelSerializer):
     units = ListUnitSerializer(many=True, read_only=True)
     total_points = serializers.SerializerMethodField()
+    validation = serializers.SerializerMethodField()
 
     class Meta:
         model = ArmyList
@@ -54,13 +61,14 @@ class ArmyListSerializer(serializers.ModelSerializer):
             "updated_at",
             "units",
             "total_points",
+            "validation",
         )
 
     def get_total_points(self, obj):
-        entries = getattr(obj, "units", None)
-        if entries is None:
-            return 0
-        return sum(entry.unit.points * entry.model_count for entry in entries.all())
+        return army_list_points(obj)
+
+    def get_validation(self, obj):
+        return army_list_validation(obj)
 
 
 class AddListUnitSerializer(serializers.ModelSerializer):
@@ -69,6 +77,20 @@ class AddListUnitSerializer(serializers.ModelSerializer):
         fields = ("unit", "model_count", "selected_weapon_slot", "notes")
 
     def validate_selected_weapon_slot(self, value: UnitWeaponSlot | None):
-        if value is not None and value.unit_id != int(self.initial_data.get("unit")):
+        raw_unit_id = self.initial_data.get("unit")
+        try:
+            unit_id = int(raw_unit_id)
+        except (TypeError, ValueError):
+            return value
+        if value is not None and value.unit_id != unit_id:
             raise serializers.ValidationError("Selected weapon slot must belong to the unit.")
         return value
+
+    def validate(self, attrs):
+        unit = attrs.get("unit")
+        model_count = attrs.get("model_count", unit.default_models if unit else 1)
+        if unit:
+            model_error = validate_model_count(unit, model_count)
+            if model_error:
+                raise serializers.ValidationError({"model_count": model_error})
+        return attrs

@@ -70,8 +70,31 @@ def test_parse_unit_maps_opr_fixture_to_model_kwargs():
         "defense": 4,
         "tough": 3,
         "points": 180,
+        "min_models": 1,
+        "max_models": None,
+        "default_models": 1,
         "special_rules": {"Fearless": True, "Regeneration": 5},
     }
+
+
+def test_parse_unit_maps_roster_model_count_bounds():
+    raw_unit = {
+        "id": "unit-guard",
+        "name": "Guard",
+        "quality": "4+",
+        "defense": "5+",
+        "cost": 90,
+        "size": 10,
+        "minSize": 5,
+        "maxSize": 20,
+        "rules": [],
+    }
+
+    parsed = parse_unit(raw_unit)
+
+    assert parsed["default_models"] == 10
+    assert parsed["min_models"] == 5
+    assert parsed["max_models"] == 20
 
 
 def test_parse_unit_maps_current_army_forge_rule_objects_to_model_kwargs():
@@ -94,6 +117,9 @@ def test_parse_unit_maps_current_army_forge_rule_objects_to_model_kwargs():
         "defense": 3,
         "tough": 6,
         "points": 130,
+        "min_models": 1,
+        "max_models": None,
+        "default_models": 1,
         "special_rules": {"Furious": True, "Tough": 6},
     }
 

@@ -94,6 +94,7 @@ def parse_special_rules(
 
 def parse_unit(raw: dict[str, Any]) -> dict[str, Any]:
     special_rules = parse_special_rules(_first(raw, "special_rules", "rules", default=[]))
+    model_counts = _parse_model_counts(raw)
     return {
         "source_uid": _first(raw, "source_uid", "uid", "id"),
         "name": raw["name"],
@@ -101,6 +102,7 @@ def parse_unit(raw: dict[str, Any]) -> dict[str, Any]:
         "defense": parse_stat_target(_first(raw, "defense", "de", "defenseStat")),
         "tough": _parse_unit_tough(raw, special_rules),
         "points": int(_first(raw, "points", "cost")),
+        **model_counts,
         "special_rules": special_rules,
     }
 
@@ -127,6 +129,44 @@ def _parse_unit_tough(raw: dict[str, Any], special_rules: dict[str, Any]) -> int
         return parse_stat_target(raw["toughness"])
     tough = special_rules.get("Tough", 1)
     return parse_stat_target(tough)
+
+
+def _parse_model_counts(raw: dict[str, Any]) -> dict[str, int | None]:
+    default_models = _optional_positive_int(
+        _first(
+            raw,
+            "default_models",
+            "defaultModels",
+            "defaultSize",
+            "size",
+            "models",
+            default=None,
+        )
+    )
+    min_models = _optional_positive_int(
+        _first(raw, "min_models", "minModels", "minSize", default=None)
+    )
+    max_models = _optional_positive_int(
+        _first(raw, "max_models", "maxModels", "maxSize", default=None)
+    )
+
+    default_models = default_models or min_models or 1
+    min_models = min_models or default_models or 1
+    if max_models is not None and max_models < min_models:
+        max_models = min_models
+
+    return {
+        "min_models": min_models,
+        "max_models": max_models,
+        "default_models": default_models,
+    }
+
+
+def _optional_positive_int(value: Any) -> int | None:
+    if value in (None, ""):
+        return None
+    parsed = parse_stat_target(value)
+    return parsed if parsed > 0 else None
 
 
 def _parse_weapon_ap(raw: dict[str, Any], raw_rules: Any) -> int:

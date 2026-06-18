@@ -8,6 +8,8 @@ import type {
   CalcResult,
   CreateListInput,
   Faction,
+  ListAnalysisResult,
+  TargetProfile,
   Unit,
   UpdateListUnitInput,
 } from './types'
@@ -77,4 +79,6 @@ export const apiClient = {
   removeListUnit: (listId: number, listUnitId: number) =>
     deleteEnvelope<ArmyList>(`/lists/${listId}/units/${listUnitId}/`),
   calculateEv: (input: CalcInput) => postEnvelope<CalcResult, CalcInput>('/calc/ev/', input),
+  analyzeList: (listId: number, targets: TargetProfile[]) =>
+    postEnvelope<ListAnalysisResult, { targets: TargetProfile[] }>(`/lists/${listId}/analysis/`, { targets }),
 }

@@ -66,4 +66,25 @@ describe('apiClient', () => {
       modifiers: { stealth: true, indirect: false },
     })
   })
+
+  it('posts list analysis requests and unwraps successful results', async () => {
+    vi.mocked(axios.create).mockReturnValue({ post: postRequest } as never)
+    postRequest.mockResolvedValue({
+      data: {
+        data: {
+          list_id: 1,
+          targets: [{ id: 'infantry', name: 'Infantry', defense: 5, tough: 1 }],
+          units: [],
+          totals: [{ target_id: 'infantry', ev: 0, wounds_per_100_points: 0 }],
+        },
+        error: null,
+      },
+    })
+
+    const targets = [{ id: 'infantry', name: 'Infantry', defense: 5, tough: 1 }]
+    const result = await apiClient.analyzeList(1, targets)
+
+    expect(result.list_id).toBe(1)
+    expect(postRequest).toHaveBeenCalledWith('/lists/1/analysis/', { targets })
+  })
 })

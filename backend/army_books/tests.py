@@ -31,6 +31,9 @@ class ArmyBookModelTests(TestCase):
 
         self.assertEqual(str(unit), "Paladins")
         self.assertEqual(unit.special_rules, {})
+        self.assertEqual(unit.min_models, 1)
+        self.assertIsNone(unit.max_models)
+        self.assertEqual(unit.default_models, 1)
         self.assertEqual(unit.faction, faction)
         self.assertEqual(faction.units.get(), unit)
         self.assertEqual(unit.source_uid, "unit-paladins")

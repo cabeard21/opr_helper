@@ -38,9 +38,23 @@ export type Unit = {
   defense: number
   tough: number
   points: number
+  min_models: number
+  max_models: number | null
+  default_models: number
   special_rules: Record<string, unknown>
   source_uid: string | null
   weapon_slots: UnitWeaponSlot[]
+}
+
+export type ListValidationMessage = {
+  code: string
+  message: string
+  list_unit_id?: number
+}
+
+export type ListValidation = {
+  errors: ListValidationMessage[]
+  warnings: ListValidationMessage[]
 }
 
 export type ListUnit = {
@@ -64,6 +78,7 @@ export type ArmyList = {
   updated_at: string
   units: ListUnit[]
   total_points: number
+  validation: ListValidation
 }
 
 export type CreateListInput = {
@@ -109,4 +124,42 @@ export type CalcResult = {
   p_zero_wounds: number
   p_kill_model: number
   p_kill_unit: number
+}
+
+export type TargetProfile = {
+  id: string
+  name: string
+  defense: number
+  tough: number
+}
+
+export type UnitTargetResult = {
+  target_id: string
+  ev: number
+  wounds_per_100_points: number
+  p_kill_model: number
+}
+
+export type ListAnalysisUnit = {
+  list_unit_id: number
+  unit_id: number
+  unit_name: string
+  model_count: number
+  points: number
+  weapon_id: number
+  weapon_name: string
+  target_results: UnitTargetResult[]
+}
+
+export type ListAnalysisTotal = {
+  target_id: string
+  ev: number
+  wounds_per_100_points: number
+}
+
+export type ListAnalysisResult = {
+  list_id: number
+  targets: TargetProfile[]
+  units: ListAnalysisUnit[]
+  totals: ListAnalysisTotal[]
 }

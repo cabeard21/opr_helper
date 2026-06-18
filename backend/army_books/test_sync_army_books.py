@@ -46,6 +46,22 @@ BOOK_DETAIL = {
                     ],
                 }
             ],
+            "upgrades": [
+                {
+                    "cost": 25,
+                    "weapons": [
+                        {
+                            "id": "weapon-blessed-great",
+                            "name": "Blessed Great Weapon",
+                            "range": 0,
+                            "attacks": 2,
+                            "specialRules": [
+                                {"id": "rule-ap", "name": "AP", "rating": 3, "label": "AP(3)"}
+                            ],
+                        }
+                    ],
+                }
+            ],
         }
     ],
 }
@@ -77,6 +93,9 @@ class SyncArmyBooksCommandTests(TestCase):
         self.assertEqual(weapon.ap, 2)
         self.assertEqual(weapon.special_rules, {"Deadly": 3})
         self.assertTrue(slot.is_default)
+        upgrade = UnitWeaponSlot.objects.get(unit=unit, weapon__source_uid="weapon-blessed-great")
+        self.assertFalse(upgrade.is_default)
+        self.assertEqual(upgrade.upgrade_cost, 25)
 
     @patch("army_books.management.commands.sync_army_books.fetch_army_book")
     @patch("army_books.management.commands.sync_army_books.fetch_army_book_list")
@@ -89,8 +108,8 @@ class SyncArmyBooksCommandTests(TestCase):
 
         self.assertEqual(Faction.objects.count(), 1)
         self.assertEqual(Unit.objects.count(), 1)
-        self.assertEqual(Weapon.objects.count(), 1)
-        self.assertEqual(UnitWeaponSlot.objects.count(), 1)
+        self.assertEqual(Weapon.objects.count(), 2)
+        self.assertEqual(UnitWeaponSlot.objects.count(), 2)
 
     @patch("army_books.management.commands.sync_army_books.fetch_army_book")
     @patch("army_books.management.commands.sync_army_books.fetch_army_book_list")
