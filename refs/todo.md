@@ -1,0 +1,8 @@
+- Export to Army Forge format
+- Keep the preview descript of the army advisor with the list and display it for future reference
+- Get rid of the share link
+- Enforce all requirements for force organization armies (see rules)
+- Allow units to be combined (see rules)
+- Allow heros to be embedded with units
+- Add more special rules
+- How do I add more reference materials for the LLM?
