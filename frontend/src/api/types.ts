@@ -100,6 +100,38 @@ export type UpdateListUnitInput = Partial<{
   notes: string
 }>
 
+export type AdvisorSuggestionInput = {
+  faction: number
+  point_limit: number
+  prompt: string
+  dry_run: boolean
+}
+
+export type SuggestedUnit = {
+  unit_id: number
+  unit_name: string
+  model_count: number
+  justification: string
+}
+
+export type ListSuggestion = {
+  units: SuggestedUnit[]
+  total_points: number
+  archetype: string
+  playstyle: string
+  activation_count: number
+  strategy_summary: string
+  warnings: string[]
+}
+
+export type AdvisorSuggestionResponse = {
+  suggestion: ListSuggestion
+  computed_total_points: number
+  point_delta: number
+  reconciliation_warnings: string[]
+  army_list: ArmyList | null
+}
+
 export type CalcInput = {
   unit_id: number
   weapon_id: number

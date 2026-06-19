@@ -147,16 +147,16 @@ export function ListBuilderPage() {
   }
 
   if (loading) {
-    return <p className="text-stone-600">Loading army list...</p>
+    return <p className="app-muted">Loading army list...</p>
   }
 
   if (!armyList) {
     return (
       <section>
-        <Link className="text-sm font-semibold text-teal-700" to="/lists">
+        <Link className="app-link" to="/lists">
           Back to lists
         </Link>
-        <p className="mt-4 rounded border border-red-200 bg-red-50 p-3 text-red-700">
+        <p className="app-alert-danger mt-4">
           {invalidListId ? 'Army list not found.' : (error ?? 'Army list not found.')}
         </p>
       </section>
@@ -167,17 +167,15 @@ export function ListBuilderPage() {
     <section>
       <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
         <div>
-          <Link className="text-sm font-semibold text-teal-700" to="/lists">
+          <Link className="app-link" to="/lists">
             Back to lists
           </Link>
-          <h1 className="mt-2 text-3xl font-bold text-stone-950">{armyList.name}</h1>
-          {readOnly ? <p className="mt-1 text-sm font-semibold text-stone-600">Read-only shared list</p> : null}
+          <h1 className="app-heading mt-2">{armyList.name}</h1>
+          {readOnly ? <p className="app-muted mt-1 text-sm font-semibold">Read-only shared list</p> : null}
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2 rounded-md border p-1" style={{ background: 'var(--color-surface)', borderColor: 'var(--color-border)' }}>
           <button
-            className={`rounded border px-3 py-2 text-sm font-semibold ${
-              activeTab === 'builder' ? 'border-stone-950 bg-stone-950 text-white' : 'border-stone-300 text-stone-700'
-            }`}
+            className={activeTab === 'builder' ? 'app-button-primary px-3' : 'app-button-secondary px-3'}
             onClick={() => setActiveTab('builder')}
             type="button"
           >
@@ -185,9 +183,7 @@ export function ListBuilderPage() {
           </button>
           {!readOnly ? (
             <button
-              className={`rounded border px-3 py-2 text-sm font-semibold ${
-                activeTab === 'analysis' ? 'border-stone-950 bg-stone-950 text-white' : 'border-stone-300 text-stone-700'
-              }`}
+              className={activeTab === 'analysis' ? 'app-button-primary px-3' : 'app-button-secondary px-3'}
               onClick={loadAnalysis}
               type="button"
             >
@@ -195,7 +191,7 @@ export function ListBuilderPage() {
             </button>
           ) : null}
           <button
-            className="rounded border border-teal-300 px-3 py-2 text-sm font-semibold text-teal-700 hover:bg-teal-50"
+            className="app-button-accent"
             onClick={createShareLink}
             type="button"
           >
@@ -203,13 +199,13 @@ export function ListBuilderPage() {
           </button>
         </div>
       </div>
-      {error ? <p className="mb-4 rounded border border-red-200 bg-red-50 p-3 text-red-700">{error}</p> : null}
+      {error ? <p className="app-alert-danger mb-4">{error}</p> : null}
       {shareUrl ? (
-        <label className="mb-4 grid gap-1 text-sm font-semibold text-stone-700">
+        <label className="app-label mb-4 grid gap-1">
           Share URL
           <input
             aria-label="Share URL"
-            className="rounded border border-stone-300 px-3 py-2 font-normal text-stone-950"
+            className="app-field"
             readOnly
             value={shareUrl}
           />
@@ -220,7 +216,7 @@ export function ListBuilderPage() {
       ) : (
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_420px]">
         <div>
-          <h2 className="mb-3 text-xl font-semibold text-stone-950">Available units</h2>
+          <h2 className="app-subheading mb-3">Available units</h2>
           <div className="grid gap-4">
             {units.map((unit) => (
               <UnitCard key={unit.id} onAdd={readOnly ? undefined : addUnit} unit={unit} />
@@ -230,11 +226,11 @@ export function ListBuilderPage() {
         <aside className="lg:sticky lg:top-6 lg:self-start">
           <PointTracker pointLimit={armyList.point_limit} totalPoints={armyList.total_points} />
           <ListValidationMessages validation={armyList.validation} />
-          <div className="mt-4 rounded-md border border-stone-200 bg-white p-4 shadow-sm">
-            <h2 className="text-xl font-semibold text-stone-950">Selected units</h2>
+          <div className="app-card mt-4">
+            <h2 className="app-subheading">Selected units</h2>
             <div className="mt-4 grid gap-3">
               {armyList.units.length === 0 ? (
-                <p className="text-sm text-stone-600">No units added yet.</p>
+                <p className="app-muted text-sm">No units added yet.</p>
               ) : null}
               {armyList.units.map((entry) => (
                 <ListUnitRow
@@ -281,15 +277,15 @@ function ListUnitRow({ busy, entry, factionId, onDecrease, onIncrease, onRemove,
     : null
 
   return (
-    <article className="rounded border border-stone-200 p-3">
+    <article className="rounded border p-3" style={{ borderColor: 'var(--color-border)' }}>
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h3 className="font-semibold text-stone-950">{entry.unit_name}</h3>
-          <p className="text-sm text-stone-600">
+          <h3 className="font-semibold" style={{ color: 'var(--color-text)' }}>{entry.unit_name}</h3>
+          <p className="app-muted text-sm">
             {entry.total_points.toLocaleString()} pts · {entry.selected_weapon_name ?? 'Default weapons'}
           </p>
           {unit ? (
-            <p className="mt-1 text-xs text-stone-500">
+            <p className="app-subtle mt-1 text-xs">
               QU{unit.quality}+ DE{unit.defense}+ T{unit.tough}
             </p>
           ) : null}
@@ -297,7 +293,7 @@ function ListUnitRow({ busy, entry, factionId, onDecrease, onIncrease, onRemove,
         <div className="flex flex-wrap justify-end gap-2">
           {calcHref ? (
             <Link
-              className="rounded border border-teal-300 px-2 py-1 text-sm font-semibold text-teal-700 hover:bg-teal-50"
+              className="app-button-accent px-2 py-1"
               to={calcHref}
             >
               Calculate {entry.unit_name}
@@ -305,7 +301,7 @@ function ListUnitRow({ busy, entry, factionId, onDecrease, onIncrease, onRemove,
           ) : null}
           {!readOnly ? (
             <button
-              className="rounded border border-stone-300 px-2 py-1 text-sm font-semibold text-stone-700 hover:bg-stone-100"
+              className="app-button-secondary px-2 py-1"
               disabled={busy}
               onClick={onRemove}
               type="button"
@@ -318,11 +314,11 @@ function ListUnitRow({ busy, entry, factionId, onDecrease, onIncrease, onRemove,
       {!readOnly ? (
         <div className="mt-3 grid gap-3">
           {unit && unit.weapon_slots.length > 0 ? (
-            <label className="grid gap-1 text-sm font-semibold text-stone-700">
+            <label className="app-label grid gap-1">
               Weapon for {entry.unit_name}
               <select
                 aria-label={`Weapon for ${entry.unit_name}`}
-                className="rounded border border-stone-300 px-3 py-2 font-normal text-stone-950"
+                className="app-field"
                 disabled={busy}
                 onChange={(event) => onSelectWeapon(Number(event.target.value))}
                 value={selectedSlot?.id ?? ''}
@@ -339,7 +335,8 @@ function ListUnitRow({ busy, entry, factionId, onDecrease, onIncrease, onRemove,
           <div className="flex items-center gap-2">
             <button
               aria-label={`Decrease ${entry.unit_name}`}
-              className="h-8 w-8 rounded border border-stone-300 text-lg font-semibold disabled:opacity-40"
+              className="h-8 w-8 rounded border text-lg font-semibold disabled:opacity-40"
+              style={{ borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
               disabled={busy || entry.model_count <= (unit?.min_models ?? 1)}
               onClick={onDecrease}
               type="button"
@@ -349,7 +346,8 @@ function ListUnitRow({ busy, entry, factionId, onDecrease, onIncrease, onRemove,
             <span className="min-w-10 text-center font-semibold">{entry.model_count}</span>
             <button
               aria-label={`Increase ${entry.unit_name}`}
-              className="h-8 w-8 rounded border border-stone-300 text-lg font-semibold disabled:opacity-40"
+              className="h-8 w-8 rounded border text-lg font-semibold disabled:opacity-40"
+              style={{ borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
               disabled={busy || (unit?.max_models !== null && unit?.max_models !== undefined && entry.model_count >= unit.max_models)}
               onClick={onIncrease}
               type="button"
@@ -370,7 +368,7 @@ function ListValidationMessages({ validation }: { validation?: ArmyList['validat
   }
 
   return (
-    <div className="mt-3 rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+    <div className="app-alert-warning mt-3 text-sm">
       {messages.map((message) => (
         <p key={`${message.code}-${message.list_unit_id ?? 'list'}`}>{message.message}</p>
       ))}
@@ -387,11 +385,11 @@ function AnalysisPanel({ analysis, loading }: AnalysisPanelProps) {
   const [selectedTargetId, setSelectedTargetId] = useState(TARGET_PROFILES[0].id)
 
   if (loading) {
-    return <p className="rounded border border-stone-200 bg-white p-4 text-stone-600">Loading analysis...</p>
+    return <p className="app-card app-muted">Loading analysis...</p>
   }
 
   if (!analysis) {
-    return <p className="rounded border border-stone-200 bg-white p-4 text-stone-600">No analysis loaded yet.</p>
+    return <p className="app-card app-muted">No analysis loaded yet.</p>
   }
 
   const selectedTarget = analysis.targets.find((target) => target.id === selectedTargetId) ?? analysis.targets[0]
@@ -403,13 +401,13 @@ function AnalysisPanel({ analysis, loading }: AnalysisPanelProps) {
     <section className="grid gap-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-stone-950">Army analysis</h2>
-          <p className="mt-1 text-sm text-stone-600">Expected wounds and efficiency by target profile.</p>
+          <h2 className="app-section-heading">Army analysis</h2>
+          <p className="app-muted mt-1 text-sm">Expected wounds and efficiency by target profile.</p>
         </div>
-        <label className="grid gap-1 text-sm font-semibold text-stone-700">
+        <label className="app-label grid gap-1">
           Army vs target
           <select
-            className="rounded border border-stone-300 px-3 py-2 font-normal text-stone-950"
+            className="app-field"
             onChange={(event) => setSelectedTargetId(event.target.value)}
             value={selectedTarget.id}
           >
@@ -428,21 +426,24 @@ function AnalysisPanel({ analysis, loading }: AnalysisPanelProps) {
         ))}
       </div>
 
-      <div className="rounded-md border border-stone-200 bg-white p-4 shadow-sm">
-        <h3 className="text-lg font-semibold text-stone-950">Army vs {selectedTarget.name}</h3>
+      <div className="app-card">
+        <h3 className="text-lg font-semibold" style={{ color: 'var(--color-text)' }}>Army vs {selectedTarget.name}</h3>
         <div className="mt-4 grid gap-3">
           {rankedUnits.map((unit) => {
             const result = resultFor(unit, selectedTarget.id)
             return (
               <div key={unit.list_unit_id}>
                 <div className="flex items-center justify-between gap-3 text-sm">
-                  <span className="font-semibold text-stone-800">{unit.unit_name}</span>
-                  <span className="text-stone-600">{result.ev.toFixed(2)} EV</span>
+                  <span className="font-semibold" style={{ color: 'var(--color-text)' }}>{unit.unit_name}</span>
+                  <span className="app-muted">{result.ev.toFixed(2)} EV</span>
                 </div>
-                <div className="mt-1 h-2 overflow-hidden rounded bg-stone-200">
+                <div className="mt-1 h-2 overflow-hidden rounded" style={{ background: 'var(--color-bg-soft)' }}>
                   <div
-                    className="h-full bg-teal-700"
-                    style={{ width: `${Math.min(100, result.wounds_per_100_points * 30)}%` }}
+                    className="h-full"
+                    style={{
+                      background: 'var(--color-accent)',
+                      width: `${Math.min(100, result.wounds_per_100_points * 30)}%`,
+                    }}
                   />
                 </div>
               </div>
@@ -451,9 +452,9 @@ function AnalysisPanel({ analysis, loading }: AnalysisPanelProps) {
         </div>
       </div>
 
-      <div className="overflow-x-auto rounded-md border border-stone-200 bg-white shadow-sm">
+      <div className="overflow-x-auto rounded-md border shadow-sm" style={{ background: 'var(--color-surface-raised)', borderColor: 'var(--color-border)' }}>
         <table className="w-full min-w-[720px] border-collapse text-sm">
-          <thead className="bg-stone-100 text-left text-stone-700">
+          <thead className="text-left" style={{ background: 'var(--color-bg-soft)', color: 'var(--color-text-muted)' }}>
             <tr>
               <th className="px-4 py-3 font-semibold">Unit</th>
               {analysis.targets.map((target) => (
@@ -470,12 +471,12 @@ function AnalysisPanel({ analysis, loading }: AnalysisPanelProps) {
           </thead>
           <tbody>
             {analysis.units.map((unit) => (
-              <tr className="border-t border-stone-200" key={unit.list_unit_id}>
-                <td className="px-4 py-3 font-semibold text-stone-900">{unit.unit_name}</td>
+              <tr className="border-t" key={unit.list_unit_id} style={{ borderColor: 'var(--color-border)' }}>
+                <td className="px-4 py-3 font-semibold" style={{ color: 'var(--color-text)' }}>{unit.unit_name}</td>
                 {analysis.targets.map((target) => {
                   const result = resultFor(unit, target.id)
                   return (
-                    <td className="px-4 py-3 text-stone-700" key={target.id}>
+                    <td className="px-4 py-3" key={target.id} style={{ color: 'var(--color-text-muted)' }}>
                       {result.ev.toFixed(2)}
                     </td>
                   )
@@ -483,7 +484,7 @@ function AnalysisPanel({ analysis, loading }: AnalysisPanelProps) {
                 {analysis.targets.map((target) => {
                   const result = resultFor(unit, target.id)
                   return (
-                    <td className="px-4 py-3 text-stone-700" key={`${target.id}-efficiency`}>
+                    <td className="px-4 py-3" key={`${target.id}-efficiency`} style={{ color: 'var(--color-text-muted)' }}>
                       {result.wounds_per_100_points.toFixed(2)}
                     </td>
                   )
@@ -504,13 +505,13 @@ function BestUnitCard({ analysis, target }: { analysis: ListAnalysisResult; targ
   const total = analysis.totals.find((candidate) => candidate.target_id === target.id)
 
   return (
-    <article className="rounded-md border border-stone-200 bg-white p-4 shadow-sm">
-      <h3 className="text-sm font-semibold uppercase text-stone-500">Best vs {target.name}</h3>
-      <p className="mt-2 text-lg font-semibold text-stone-950">{bestUnit?.unit_name ?? 'No units'}</p>
-      <p className="mt-1 text-sm text-stone-600">
+    <article className="app-card">
+      <h3 className="app-subtle text-sm font-semibold uppercase">Best vs {target.name}</h3>
+      <p className="mt-2 text-lg font-semibold" style={{ color: 'var(--color-text)' }}>{bestUnit?.unit_name ?? 'No units'}</p>
+      <p className="app-muted mt-1 text-sm">
         {bestUnit ? `${resultFor(bestUnit, target.id).wounds_per_100_points.toFixed(2)} wounds / 100 pts` : 'Add units to compare'}
       </p>
-      <p className="mt-3 text-xs font-semibold text-stone-500">
+      <p className="app-subtle mt-3 text-xs font-semibold">
         {total ? `${total.ev.toFixed(2)} total EV` : '0.00 total EV'}
       </p>
     </article>

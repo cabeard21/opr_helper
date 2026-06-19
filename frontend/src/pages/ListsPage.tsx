@@ -50,44 +50,50 @@ export function ListsPage() {
       <div>
         <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
           <div>
-            <Link className="text-sm font-semibold text-teal-700" to="/">
+            <Link className="app-link" to="/">
               Back to factions
             </Link>
-            <h1 className="mt-2 text-3xl font-bold text-stone-950">Army lists</h1>
+            <h1 className="app-heading mt-2">Army lists</h1>
           </div>
+          <Link className="app-button-primary" to="/advisor">
+            Army advisor
+          </Link>
         </div>
-        {loading ? <p className="text-stone-600">Loading lists...</p> : null}
-        {error ? <p className="mb-4 rounded border border-red-200 bg-red-50 p-3 text-red-700">{error}</p> : null}
+        {loading ? <p className="app-muted">Loading lists...</p> : null}
+        {error ? <p className="app-alert-danger mb-4">{error}</p> : null}
         <div className="grid gap-3">
+          {!loading && lists.length === 0 ? (
+            <p className="app-card app-muted">No lists yet. Create one here, or use the advisor to draft a starting point.</p>
+          ) : null}
           {lists.map((list) => (
             <Link
-              className="rounded-md border border-stone-200 bg-white p-4 shadow-sm hover:border-teal-500"
+              className="app-card-link p-4"
               key={list.id}
               to={`/lists/${list.id}`}
             >
-              <h2 className="text-lg font-semibold text-stone-950">{list.name}</h2>
-              <p className="mt-1 text-sm text-stone-600">
+              <h2 className="text-lg font-semibold" style={{ color: 'var(--color-text)' }}>{list.name}</h2>
+              <p className="app-muted mt-1 text-sm">
                 {list.total_points.toLocaleString()} / {list.point_limit.toLocaleString()} pts
               </p>
             </Link>
           ))}
         </div>
       </div>
-      <form className="rounded-md border border-stone-200 bg-white p-5 shadow-sm" onSubmit={handleCreate}>
-        <h2 className="text-xl font-semibold text-stone-950">Create list</h2>
-        <label className="mt-4 block text-sm font-medium text-stone-700">
+      <form className="app-card-lg" onSubmit={handleCreate}>
+        <h2 className="app-subheading">Create list</h2>
+        <label className="app-label mt-4 block">
           Name
           <input
-            className="mt-1 w-full rounded border border-stone-300 px-3 py-2"
+            className="app-field mt-1 w-full"
             onChange={(event) => setName(event.target.value)}
             required
             value={name}
           />
         </label>
-        <label className="mt-4 block text-sm font-medium text-stone-700">
+        <label className="app-label mt-4 block">
           Faction
           <select
-            className="mt-1 w-full rounded border border-stone-300 px-3 py-2"
+            className="app-field mt-1 w-full"
             onChange={(event) => setFactionId(Number(event.target.value))}
             required
             value={factionId}
@@ -99,10 +105,10 @@ export function ListsPage() {
             ))}
           </select>
         </label>
-        <label className="mt-4 block text-sm font-medium text-stone-700">
+        <label className="app-label mt-4 block">
           Point limit
           <input
-            className="mt-1 w-full rounded border border-stone-300 px-3 py-2"
+            className="app-field mt-1 w-full"
             min={1}
             onChange={(event) => setPointLimit(Number(event.target.value))}
             required
@@ -110,7 +116,7 @@ export function ListsPage() {
             value={pointLimit}
           />
         </label>
-        <button className="mt-5 w-full rounded bg-stone-950 px-4 py-2 font-semibold text-white" type="submit">
+        <button className="app-button-primary mt-5 w-full" type="submit">
           Create
         </button>
       </form>

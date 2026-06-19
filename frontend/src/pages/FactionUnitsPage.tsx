@@ -31,17 +31,17 @@ export function FactionUnitsPage() {
     <section>
       <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
         <div>
-          <Link className="text-sm font-semibold text-teal-700" to="/">
+          <Link className="app-link" to="/">
             Back to factions
           </Link>
-          <h1 className="mt-2 text-3xl font-bold text-stone-950">Faction units</h1>
+          <h1 className="app-heading mt-2">Faction units</h1>
         </div>
-        <Link className="rounded border border-stone-300 px-4 py-2 text-sm font-semibold" to="/lists">
+        <Link className="app-button-secondary" to="/lists">
           Open lists
         </Link>
       </div>
-      {loading ? <p className="text-stone-600">Loading units...</p> : null}
-      {pageError ? <p className="rounded border border-red-200 bg-red-50 p-3 text-red-700">{pageError}</p> : null}
+      {loading ? <p className="app-muted">Loading units...</p> : null}
+      {pageError ? <p className="app-alert-danger">{pageError}</p> : null}
       <div className="grid gap-4 lg:grid-cols-2">
         {units.map((unit) => (
           <UnitCard key={unit.id} unit={unit} />

@@ -143,23 +143,23 @@ export function CalcPage() {
     <section>
       <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
         <div>
-          <Link className="text-sm font-semibold text-teal-700" to="/lists">
+          <Link className="app-link" to="/lists">
             Back to lists
           </Link>
-          <h1 className="mt-2 text-3xl font-bold text-stone-950">Probability calculator</h1>
+          <h1 className="app-heading mt-2">Probability calculator</h1>
         </div>
       </div>
 
-      {error ? <p className="mb-4 rounded border border-red-200 bg-red-50 p-3 text-red-700">{error}</p> : null}
+      {error ? <p className="app-alert-danger mb-4">{error}</p> : null}
 
       <div className="grid gap-6 xl:grid-cols-[320px_320px_minmax(0,1fr)]">
-        <section aria-label="Attacker" className="rounded-md border border-stone-200 bg-white p-4 shadow-sm">
-          <h2 className="text-xl font-semibold text-stone-950">Attacker</h2>
+        <section aria-label="Attacker" className="app-card">
+          <h2 className="app-subheading">Attacker</h2>
           <div className="mt-4 grid gap-4">
-            <label className="grid gap-1 text-sm font-semibold text-stone-700">
+            <label className="app-label grid gap-1">
               Faction
               <select
-                className="rounded border border-stone-300 px-3 py-2 font-normal text-stone-950"
+                className="app-field"
                 disabled={loadingFactions}
                 onChange={(event) => {
                   setResult(null)
@@ -178,10 +178,10 @@ export function CalcPage() {
               </select>
             </label>
 
-            <label className="grid gap-1 text-sm font-semibold text-stone-700">
+            <label className="app-label grid gap-1">
               Unit
               <select
-                className="rounded border border-stone-300 px-3 py-2 font-normal text-stone-950"
+                className="app-field"
                 disabled={units.length === 0}
                 onChange={(event) => {
                   const unitId = Number(event.target.value)
@@ -202,10 +202,10 @@ export function CalcPage() {
               </select>
             </label>
 
-            <label className="grid gap-1 text-sm font-semibold text-stone-700">
+            <label className="app-label grid gap-1">
               Weapon
               <select
-                className="rounded border border-stone-300 px-3 py-2 font-normal text-stone-950"
+                className="app-field"
                 disabled={!selectedUnit || selectedUnit.weapon_slots.length === 0}
                 onChange={(event) => {
                   setResult(null)
@@ -224,13 +224,13 @@ export function CalcPage() {
           </div>
         </section>
 
-        <section aria-label="Target" className="rounded-md border border-stone-200 bg-white p-4 shadow-sm">
-          <h2 className="text-xl font-semibold text-stone-950">Target</h2>
+        <section aria-label="Target" className="app-card">
+          <h2 className="app-subheading">Target</h2>
           <div className="mt-4 grid gap-4">
-            <label className="grid gap-1 text-sm font-semibold text-stone-700">
+            <label className="app-label grid gap-1">
               Profile
               <select
-                className="rounded border border-stone-300 px-3 py-2 font-normal text-stone-950"
+                className="app-field"
                 onChange={(event) => {
                   setResult(null)
                   setTargetPresetId(event.target.value)
@@ -246,10 +246,10 @@ export function CalcPage() {
             </label>
 
             <div className="grid grid-cols-2 gap-3">
-              <label className="grid gap-1 text-sm font-semibold text-stone-700">
+              <label className="app-label grid gap-1">
                 Defense
                 <input
-                  className="rounded border border-stone-300 px-3 py-2 font-normal text-stone-950"
+                  className="app-field"
                   disabled={targetPresetId !== 'custom'}
                   max={6}
                   min={2}
@@ -261,10 +261,10 @@ export function CalcPage() {
                   value={target.defense}
                 />
               </label>
-              <label className="grid gap-1 text-sm font-semibold text-stone-700">
+              <label className="app-label grid gap-1">
                 Tough
                 <input
-                  className="rounded border border-stone-300 px-3 py-2 font-normal text-stone-950"
+                  className="app-field"
                   disabled={targetPresetId !== 'custom'}
                   min={1}
                   onChange={(event) => {
@@ -277,17 +277,17 @@ export function CalcPage() {
               </label>
             </div>
 
-            <label className="flex items-center gap-2 text-sm font-semibold text-stone-700">
+            <label className="app-label flex items-center gap-2">
               <input checked={stealth} onChange={(event) => setStealth(event.target.checked)} type="checkbox" />
               Stealth
             </label>
-            <label className="flex items-center gap-2 text-sm font-semibold text-stone-700">
+            <label className="app-label flex items-center gap-2">
               <input checked={indirect} onChange={(event) => setIndirect(event.target.checked)} type="checkbox" />
               Indirect
             </label>
 
             <button
-              className="rounded bg-stone-950 px-3 py-2 text-sm font-semibold text-white hover:bg-stone-800 disabled:opacity-50"
+              className="app-button-primary"
               disabled={calculating || !selectedUnit || !selectedWeapon}
               onClick={calculate}
               type="button"
@@ -297,8 +297,8 @@ export function CalcPage() {
           </div>
         </section>
 
-        <section aria-label="Results" className="rounded-md border border-stone-200 bg-white p-4 shadow-sm">
-          <h2 className="text-xl font-semibold text-stone-950">Results</h2>
+        <section aria-label="Results" className="app-card">
+          <h2 className="app-subheading">Results</h2>
           {result ? (
             <div className="mt-4">
               <div className="grid gap-3 sm:grid-cols-4">
@@ -321,7 +321,7 @@ export function CalcPage() {
               </div>
             </div>
           ) : (
-            <p className="mt-4 text-sm text-stone-600">Select an attacker and target, then calculate.</p>
+            <p className="app-muted mt-4 text-sm">Select an attacker and target, then calculate.</p>
           )}
         </section>
       </div>
@@ -336,9 +336,9 @@ type ResultStatProps = {
 
 function ResultStat({ label, value }: ResultStatProps) {
   return (
-    <div className="rounded border border-stone-200 bg-stone-50 p-3">
-      <p className="text-xs font-semibold uppercase text-stone-500">{label}</p>
-      <p className="mt-1 text-2xl font-semibold text-stone-950">{value}</p>
+    <div className="rounded border p-3" style={{ background: 'var(--color-bg-soft)', borderColor: 'var(--color-border)' }}>
+      <p className="app-subtle text-xs font-semibold uppercase">{label}</p>
+      <p className="mt-1 text-2xl font-semibold" style={{ color: 'var(--color-text)' }}>{value}</p>
     </div>
   )
 }

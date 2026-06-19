@@ -11,22 +11,23 @@ export function PointTracker({ pointLimit, totalPoints }: PointTrackerProps) {
 
   return (
     <section
-      className={`rounded-md border bg-white p-4 shadow-sm ${
-        overBy > 0 ? 'border-red-300' : 'border-stone-200'
-      }`}
+      className="app-card"
+      style={{ borderColor: overBy > 0 ? 'var(--color-danger)' : 'var(--color-border)' }}
       aria-label="Point tracker"
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="text-sm font-medium text-stone-500">Army points</p>
-          <p className="text-2xl font-semibold text-stone-950">
+          <p className="app-subtle text-sm font-medium">Army points</p>
+          <p className="text-2xl font-semibold" style={{ color: 'var(--color-text)' }}>
             {totalPoints.toLocaleString()} / {pointLimit.toLocaleString()} pts
           </p>
         </div>
         <div
-          className={`rounded px-3 py-1 text-sm font-semibold ${
-            overBy > 0 ? 'bg-red-100 text-red-800' : 'bg-emerald-100 text-emerald-800'
-          }`}
+          className="rounded px-3 py-1 text-sm font-semibold"
+          style={{
+            background: overBy > 0 ? 'var(--color-danger-soft)' : 'var(--color-success-soft)',
+            color: overBy > 0 ? 'var(--color-danger)' : 'var(--color-success)',
+          }}
         >
           {status}
         </div>
@@ -37,14 +38,18 @@ export function PointTracker({ pointLimit, totalPoints }: PointTrackerProps) {
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={percentage}
-        className="mt-4 h-2 overflow-hidden rounded bg-stone-200"
+        className="mt-4 h-2 overflow-hidden rounded"
+        style={{ background: 'var(--color-bg-soft)' }}
       >
         <div
-          className={`h-full ${overBy > 0 ? 'bg-red-500' : 'bg-emerald-600'}`}
-          style={{ width: `${percentage}%` }}
+          className="h-full"
+          style={{
+            background: overBy > 0 ? 'var(--color-danger)' : 'var(--color-success)',
+            width: `${percentage}%`,
+          }}
         />
       </div>
-      <p className={`mt-3 text-sm font-medium ${overBy > 0 ? 'text-red-700' : 'text-stone-600'}`}>
+      <p className="mt-3 text-sm font-medium" style={{ color: overBy > 0 ? 'var(--color-danger)' : 'var(--color-text-muted)' }}>
         {overBy > 0 ? `${overBy.toLocaleString()} pts over` : `${remaining.toLocaleString()} pts remaining`}
       </p>
     </section>

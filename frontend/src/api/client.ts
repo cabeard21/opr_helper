@@ -2,6 +2,8 @@ import axios from 'axios'
 
 import type {
   AddListUnitInput,
+  AdvisorSuggestionInput,
+  AdvisorSuggestionResponse,
   ApiEnvelope,
   ArmyList,
   CalcInput,
@@ -81,4 +83,6 @@ export const apiClient = {
   calculateEv: (input: CalcInput) => postEnvelope<CalcResult, CalcInput>('/calc/ev/', input),
   analyzeList: (listId: number, targets: TargetProfile[]) =>
     postEnvelope<ListAnalysisResult, { targets: TargetProfile[] }>(`/lists/${listId}/analysis/`, { targets }),
+  suggestArmyList: (input: AdvisorSuggestionInput) =>
+    postEnvelope<AdvisorSuggestionResponse, AdvisorSuggestionInput>('/advisor/suggest/', input),
 }

@@ -87,4 +87,43 @@ describe('apiClient', () => {
     expect(result.list_id).toBe(1)
     expect(postRequest).toHaveBeenCalledWith('/lists/1/analysis/', { targets })
   })
+
+  it('posts advisor suggestion requests and unwraps successful results', async () => {
+    vi.mocked(axios.create).mockReturnValue({ post: postRequest } as never)
+    postRequest.mockResolvedValue({
+      data: {
+        data: {
+          suggestion: {
+            units: [],
+            total_points: 0,
+            archetype: 'Offensive Elite',
+            playstyle: 'Shove It In',
+            activation_count: 0,
+            strategy_summary: 'Push the center.',
+            warnings: [],
+          },
+          computed_total_points: 0,
+          point_delta: 2000,
+          reconciliation_warnings: [],
+          army_list: null,
+        },
+        error: null,
+      },
+    })
+
+    const result = await apiClient.suggestArmyList({
+      faction: 1,
+      point_limit: 2000,
+      prompt: 'Aggressive elite list.',
+      dry_run: true,
+    })
+
+    expect(result.point_delta).toBe(2000)
+    expect(postRequest).toHaveBeenCalledWith('/advisor/suggest/', {
+      faction: 1,
+      point_limit: 2000,
+      prompt: 'Aggressive elite list.',
+      dry_run: true,
+    })
+  })
 })
