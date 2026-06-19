@@ -4,6 +4,7 @@ Django==5.2.15
 django-cors-headers==4.9.0
 djangorestframework==3.17.1
 iniconfig==2.3.0
+openai==2.43.0
 packaging==26.2
 pluggy==1.6.0
 Pygments==2.20.0

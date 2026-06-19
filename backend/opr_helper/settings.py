@@ -3,6 +3,8 @@
 import os
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -16,6 +18,23 @@ def env_bool(name: str, default: bool = False) -> bool:
 
 def env_list(name: str, default: str = "") -> list[str]:
     return [value.strip() for value in os.getenv(name, default).split(",") if value.strip()]
+
+
+def _validate_llm_configuration(
+    *,
+    debug: bool,
+    provider: str,
+    openai_api_key: str,
+) -> None:
+    supported_providers = {"openai"}
+    if debug:
+        return
+    if provider not in supported_providers:
+        raise ImproperlyConfigured(
+            f"Unsupported LLM_PROVIDER '{provider}'. Supported providers: openai."
+        )
+    if provider == "openai" and not openai_api_key:
+        raise ImproperlyConfigured("OPENAI_API_KEY must be set when LLM_PROVIDER=openai.")
 
 
 # Development default only. Set DJANGO_SECRET_KEY in deployed environments.
@@ -40,6 +59,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'army_books',
     'lists',
+    'advisor',
 ]
 
 MIDDLEWARE = [
@@ -133,6 +153,18 @@ REST_FRAMEWORK = {
         "rest_framework.parsers.JSONParser",
     ],
 }
+
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openai").strip().lower()
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.5").strip()
+ADVISOR_RATE_LIMIT_REQUESTS = int(os.getenv("ADVISOR_RATE_LIMIT_REQUESTS", "60"))
+ADVISOR_RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("ADVISOR_RATE_LIMIT_WINDOW_SECONDS", "60"))
+
+_validate_llm_configuration(
+    debug=DEBUG,
+    provider=LLM_PROVIDER,
+    openai_api_key=OPENAI_API_KEY,
+)
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
