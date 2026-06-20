@@ -56,6 +56,7 @@ export function AdvisorPage() {
         point_limit: pointLimit,
         prompt: prompt.trim(),
         dry_run: dryRun,
+        ...(dryRun || !result ? {} : { suggestion: result.suggestion }),
       })
       setResult(nextResult)
       if (!dryRun && nextResult.army_list) {
@@ -84,7 +85,10 @@ export function AdvisorPage() {
           <select
             className="app-field mt-1 w-full"
             disabled={loading || submitting !== null}
-            onChange={(event) => setFactionId(Number(event.target.value))}
+            onChange={(event) => {
+              setFactionId(Number(event.target.value))
+              setResult(null)
+            }}
             value={factionId}
           >
             {factions.map((faction) => (
@@ -100,7 +104,10 @@ export function AdvisorPage() {
           <input
             className="app-field mt-1 w-full"
             min={1}
-            onChange={(event) => setPointLimit(Number(event.target.value))}
+            onChange={(event) => {
+              setPointLimit(Number(event.target.value))
+              setResult(null)
+            }}
             type="number"
             value={pointLimit}
           />
@@ -111,7 +118,10 @@ export function AdvisorPage() {
           <textarea
             className="app-field mt-1 min-h-36 w-full"
             maxLength={2000}
-            onChange={(event) => setPrompt(event.target.value)}
+            onChange={(event) => {
+              setPrompt(event.target.value)
+              setResult(null)
+            }}
             value={prompt}
           />
         </label>
@@ -202,19 +212,23 @@ function AdvisorPreview({
         {result.suggestion.units.length === 0 ? (
           <p className="app-card app-muted text-sm">No valid units suggested.</p>
         ) : null}
-        {result.suggestion.units.map((unit) => (
-          <article className="app-card" key={unit.unit_id}>
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <h3 className="text-lg font-semibold" style={{ color: 'var(--color-text)' }}>{unit.unit_name}</h3>
-                <p className="app-muted mt-1 text-sm">{unit.justification}</p>
+        {result.suggestion.units.map((unit, index, units) => {
+          const host = unit.parent_unit_index == null ? null : units[unit.parent_unit_index]
+          return (
+            <article className="app-card" key={`${unit.unit_id}-${index}`}>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-lg font-semibold" style={{ color: 'var(--color-text)' }}>{unit.unit_name}</h3>
+                  {host ? <p className="mt-1 text-sm font-semibold" style={{ color: 'var(--color-accent)' }}>Embedded in {host.unit_name}</p> : null}
+                  <p className="app-muted mt-1 text-sm">{unit.justification}</p>
+                </div>
+                <p className="rounded border px-2 py-1 text-sm font-semibold" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-muted)' }}>
+                  x{unit.model_count}
+                </p>
               </div>
-              <p className="rounded border px-2 py-1 text-sm font-semibold" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-muted)' }}>
-                x{unit.model_count}
-              </p>
-            </div>
-          </article>
-        ))}
+            </article>
+          )
+        })}
       </div>
     </section>
   )

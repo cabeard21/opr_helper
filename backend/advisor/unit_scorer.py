@@ -6,6 +6,7 @@ from typing import Any
 from army_books.calc.engine import calculate_distribution, calculate_ev
 from army_books.models import Unit, UnitWeaponSlot
 from lists.analysis import DEFAULT_TARGETS, TargetProfile
+from lists.validation import unit_selection_points
 
 
 @dataclass(frozen=True)
@@ -34,12 +35,13 @@ class UnitProfile:
     has_stealth: bool
     has_regeneration: bool
     is_ranged: bool
+    upgrade_options: tuple[str, ...]
 
 
 def score_faction_units(faction_id: int) -> list[UnitProfile]:
     units = (
         Unit.objects.filter(faction_id=faction_id)
-        .prefetch_related("weapon_slots__weapon")
+        .prefetch_related("weapon_slots__weapon", "upgrade_sections__options")
         .order_by("name", "id")
     )
     targets = [
@@ -56,9 +58,10 @@ def score_faction_units(faction_id: int) -> list[UnitProfile]:
 
 def _score_unit(unit: Unit, targets: list[TargetProfile]) -> UnitProfile:
     slots = list(unit.weapon_slots.all())
-    default_slot = _default_slot(slots)
+    default_slots = _default_slots(slots)
+    default_slot = default_slots[0] if default_slots else None
     target_results = {
-        target.id: _target_score(unit, default_slot, target)
+        target.id: _target_score(unit, default_slots, target)
         for target in targets
     }
     infantry_score = target_results["infantry"]
@@ -93,6 +96,7 @@ def _score_unit(unit: Unit, targets: list[TargetProfile]) -> UnitProfile:
         has_stealth=_has_rule(unit.special_rules, "Stealth"),
         has_regeneration=_has_rule(unit.special_rules, "Regeneration"),
         is_ranged=bool(default_slot and default_slot.weapon.range > 0),
+        upgrade_options=_compact_upgrade_options(unit),
     )
 
 
@@ -100,35 +104,46 @@ def _default_slot(slots: list[UnitWeaponSlot]) -> UnitWeaponSlot | None:
     return next((slot for slot in slots if slot.is_default), None) or (slots[0] if slots else None)
 
 
+def _default_slots(slots: list[UnitWeaponSlot]) -> list[UnitWeaponSlot]:
+    defaults = [slot for slot in slots if slot.is_default]
+    if defaults:
+        return defaults
+    fallback = _default_slot(slots)
+    return [fallback] if fallback else []
+
+
 def _target_score(
     unit: Unit,
-    slot: UnitWeaponSlot | None,
+    slots: list[UnitWeaponSlot],
     target: TargetProfile,
 ) -> dict[str, float]:
-    if slot is None:
+    if not slots:
         return {"ev": 0, "wounds_per_100_points": 0, "p_kill_model": 0}
 
-    weapon = slot.weapon
-    points = unit.points * unit.default_models + slot.upgrade_cost
-    attacks = weapon.attacks * unit.default_models
-    special_rules = {**unit.special_rules, **weapon.special_rules}
-    ev = calculate_ev(attacks, unit.quality, target.defense, weapon.ap, special_rules)
-    distribution = calculate_distribution(
-        attacks,
-        unit.quality,
-        target.defense,
-        weapon.ap,
-        special_rules,
-    )
-    p_kill_model = sum(
-        point["probability"]
-        for point in distribution
-        if int(point["wounds"]) >= target.tough
-    )
+    points = unit_selection_points(unit=unit, model_count=unit.default_models)
+    ev = 0.0
+    p_kill_model = 0.0
+    for slot in slots:
+        weapon = slot.weapon
+        attacks = weapon.attacks * unit.default_models
+        special_rules = {**unit.special_rules, **weapon.special_rules}
+        ev += calculate_ev(attacks, unit.quality, target.defense, weapon.ap, special_rules)
+        distribution = calculate_distribution(
+            attacks,
+            unit.quality,
+            target.defense,
+            weapon.ap,
+            special_rules,
+        )
+        p_kill_model += sum(
+            point["probability"]
+            for point in distribution
+            if int(point["wounds"]) >= target.tough
+        )
     return {
         "ev": round(ev, 6),
         "wounds_per_100_points": round((ev / points) * 100, 6) if points > 0 else 0,
-        "p_kill_model": round(p_kill_model, 6),
+        "p_kill_model": round(min(1, p_kill_model), 6),
     }
 
 
@@ -138,3 +153,13 @@ def _has_rule(special_rules: dict[str, Any], name: str) -> bool:
         if key.lower() == normalized:
             return bool(value)
     return False
+
+
+def _compact_upgrade_options(unit: Unit) -> tuple[str, ...]:
+    options: list[str] = []
+    for section in unit.upgrade_sections.all():
+        targets = ", ".join(str(target) for target in section.targets[:2])
+        target_summary = f" replaces {targets}" if targets else ""
+        for option in section.options.all():
+            options.append(f"{option.id}: {option.label} (+{option.cost}){target_summary}")
+    return tuple(options[:4])

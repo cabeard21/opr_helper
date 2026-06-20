@@ -27,9 +27,14 @@ const factions: Faction[] = [
 
 const createdList: ArmyList = {
   id: 44,
-  name: 'Advisor Suggestion - Kingdom of Angels',
+  name: 'Kingdom of Angels - Offensive Elite (2000 pts)',
   faction: 1,
   point_limit: 2000,
+  advisor_archetype: 'Offensive Elite',
+  advisor_playstyle: 'Shove It In',
+  advisor_strategy_summary: 'Push Paladins through the center.',
+  advisor_prompt: 'Aggressive elite list with anti-tough damage.',
+  advisor_warnings: ['Low activation count.'],
   created_at: '2026-01-01T00:00:00Z',
   updated_at: '2026-01-01T00:00:00Z',
   total_points: 180,
@@ -44,7 +49,17 @@ const previewResponse: AdvisorSuggestionResponse = {
         unit_id: 10,
         unit_name: 'Paladins',
         model_count: 1,
+        selected_upgrade_ids: [],
+        parent_unit_index: null,
         justification: 'Durable high-AP center pressure.',
+      },
+      {
+        unit_id: 11,
+        unit_name: 'Champion',
+        model_count: 1,
+        selected_upgrade_ids: [],
+        parent_unit_index: 0,
+        justification: 'Embedded aura support.',
       },
     ],
     total_points: 180,
@@ -93,6 +108,8 @@ describe('AdvisorPage', () => {
     expect(screen.getByText('180 / 2,000 pts')).toBeInTheDocument()
     expect(screen.getByText('Paladins')).toBeInTheDocument()
     expect(screen.getByText(/Durable high-AP/)).toBeInTheDocument()
+    expect(screen.getByText('Champion')).toBeInTheDocument()
+    expect(screen.getByText(/Embedded in Paladins/)).toBeInTheDocument()
     expect(screen.getByText(/Low activation count/)).toBeInTheDocument()
     expect(screen.getByText(/model count was reduced/)).toBeInTheDocument()
     expect(apiClient.suggestArmyList).toHaveBeenCalledWith({
@@ -110,6 +127,7 @@ describe('AdvisorPage', () => {
         point_limit: 2000,
         prompt: 'Aggressive elite list with anti-tough damage.',
         dry_run: false,
+        suggestion: previewResponse.suggestion,
       })
     })
     expect(await screen.findByRole('heading', { name: 'Created list' })).toBeInTheDocument()
