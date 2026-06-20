@@ -159,6 +159,8 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.5").strip()
 ADVISOR_RATE_LIMIT_REQUESTS = int(os.getenv("ADVISOR_RATE_LIMIT_REQUESTS", "60"))
 ADVISOR_RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("ADVISOR_RATE_LIMIT_WINDOW_SECONDS", "60"))
+ADVISOR_REFERENCE_DIR = Path(os.getenv("ADVISOR_REFERENCE_DIR", BASE_DIR.parent / "refs" / "advisor_context"))
+ADVISOR_REFERENCE_MAX_CHARS = int(os.getenv("ADVISOR_REFERENCE_MAX_CHARS", "6000"))
 
 _validate_llm_configuration(
     debug=DEBUG,

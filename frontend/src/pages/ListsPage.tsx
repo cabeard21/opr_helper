@@ -14,6 +14,7 @@ export function ListsPage() {
   const [factionId, setFactionId] = useState<number | ''>('')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [deletingListId, setDeletingListId] = useState<number | null>(null)
 
   useEffect(() => {
     Promise.all([apiClient.getLists(), apiClient.getFactions()])
@@ -45,6 +46,23 @@ export function ListsPage() {
     }
   }
 
+  async function handleDelete(list: ArmyList) {
+    if (!window.confirm(`Delete ${list.name}?`)) {
+      return
+    }
+
+    setDeletingListId(list.id)
+    setError(null)
+    try {
+      await apiClient.deleteList(list.id)
+      setLists((currentLists) => currentLists.filter((candidate) => candidate.id !== list.id))
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setDeletingListId(null)
+    }
+  }
+
   return (
     <section className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
       <div>
@@ -66,16 +84,28 @@ export function ListsPage() {
             <p className="app-card app-muted">No lists yet. Create one here, or use the advisor to draft a starting point.</p>
           ) : null}
           {lists.map((list) => (
-            <Link
-              className="app-card-link p-4"
+            <article
+              className="app-card p-4"
               key={list.id}
-              to={`/lists/${list.id}`}
             >
-              <h2 className="text-lg font-semibold" style={{ color: 'var(--color-text)' }}>{list.name}</h2>
-              <p className="app-muted mt-1 text-sm">
-                {list.total_points.toLocaleString()} / {list.point_limit.toLocaleString()} pts
-              </p>
-            </Link>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <Link className="block min-w-0 flex-1" to={`/lists/${list.id}`}>
+                  <h2 className="text-lg font-semibold" style={{ color: 'var(--color-text)' }}>{list.name}</h2>
+                  <p className="app-muted mt-1 text-sm">
+                    {list.total_points.toLocaleString()} / {list.point_limit.toLocaleString()} pts
+                  </p>
+                </Link>
+                <button
+                  aria-label={`Delete ${list.name}`}
+                  className="app-button-secondary px-3 py-2"
+                  disabled={deletingListId === list.id}
+                  onClick={() => handleDelete(list)}
+                  type="button"
+                >
+                  {deletingListId === list.id ? 'Deleting...' : 'Delete'}
+                </button>
+              </div>
+            </article>
           ))}
         </div>
       </div>

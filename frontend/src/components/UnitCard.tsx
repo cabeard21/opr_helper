@@ -16,7 +16,8 @@ function formatRules(rules: Record<string, unknown>) {
 }
 
 export function UnitCard({ unit, onAdd }: UnitCardProps) {
-  const defaultWeapon = unit.weapon_slots.find((slot) => slot.is_default) ?? unit.weapon_slots[0]
+  const defaultWeapons = unit.weapon_slots.filter((slot) => slot.is_default)
+  const displayWeapons = defaultWeapons.length > 0 ? defaultWeapons : unit.weapon_slots.slice(0, 1)
 
   return (
     <article className="app-card">
@@ -50,9 +51,11 @@ export function UnitCard({ unit, onAdd }: UnitCardProps) {
         </div>
       </div>
       <p className="app-muted mt-4 text-sm">{formatRules(unit.special_rules)}</p>
-      {defaultWeapon ? (
+      {displayWeapons.length > 0 ? (
         <p className="app-muted mt-3 rounded px-3 py-2 text-sm" style={{ background: 'var(--color-bg-soft)' }}>
-          {defaultWeapon.weapon.name} · {defaultWeapon.weapon.attacks_string} · AP{defaultWeapon.weapon.ap}
+          {displayWeapons
+            .map((slot) => `${slot.weapon.name} - ${slot.weapon.attacks_string} - AP${slot.weapon.ap}`)
+            .join(' + ')}
         </p>
       ) : null}
     </article>

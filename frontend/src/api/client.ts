@@ -5,6 +5,7 @@ import type {
   AdvisorSuggestionInput,
   AdvisorSuggestionResponse,
   ApiEnvelope,
+  ArmyForgeExport,
   ArmyList,
   CalcInput,
   CalcResult,
@@ -44,24 +45,47 @@ function unwrap<T>(envelope: ApiEnvelope<T>): T {
   return envelope.data
 }
 
+function unwrapHttpError(error: unknown): never {
+  if (axios.isAxiosError<ApiEnvelope<unknown>>(error) && error.response?.data) {
+    unwrap(error.response.data)
+  }
+  throw error
+}
+
 async function getEnvelope<T>(path: string): Promise<T> {
-  const response = await http().get<ApiEnvelope<T>>(path)
-  return unwrap(response.data)
+  try {
+    const response = await http().get<ApiEnvelope<T>>(path)
+    return unwrap(response.data)
+  } catch (error) {
+    unwrapHttpError(error)
+  }
 }
 
 async function postEnvelope<T, TBody>(path: string, body: TBody): Promise<T> {
-  const response = await http().post<ApiEnvelope<T>>(path, body)
-  return unwrap(response.data)
+  try {
+    const response = await http().post<ApiEnvelope<T>>(path, body)
+    return unwrap(response.data)
+  } catch (error) {
+    unwrapHttpError(error)
+  }
 }
 
 async function patchEnvelope<T, TBody>(path: string, body: TBody): Promise<T> {
-  const response = await http().patch<ApiEnvelope<T>>(path, body)
-  return unwrap(response.data)
+  try {
+    const response = await http().patch<ApiEnvelope<T>>(path, body)
+    return unwrap(response.data)
+  } catch (error) {
+    unwrapHttpError(error)
+  }
 }
 
 async function deleteEnvelope<T>(path: string): Promise<T> {
-  const response = await http().delete<ApiEnvelope<T>>(path)
-  return unwrap(response.data)
+  try {
+    const response = await http().delete<ApiEnvelope<T>>(path)
+    return unwrap(response.data)
+  } catch (error) {
+    unwrapHttpError(error)
+  }
 }
 
 export const apiClient = {
@@ -83,6 +107,7 @@ export const apiClient = {
   calculateEv: (input: CalcInput) => postEnvelope<CalcResult, CalcInput>('/calc/ev/', input),
   analyzeList: (listId: number, targets: TargetProfile[]) =>
     postEnvelope<ListAnalysisResult, { targets: TargetProfile[] }>(`/lists/${listId}/analysis/`, { targets }),
+  exportArmyForgeList: (listId: number) => getEnvelope<ArmyForgeExport>(`/lists/${listId}/export/army-forge/`),
   suggestArmyList: (input: AdvisorSuggestionInput) =>
     postEnvelope<AdvisorSuggestionResponse, AdvisorSuggestionInput>('/advisor/suggest/', input),
 }

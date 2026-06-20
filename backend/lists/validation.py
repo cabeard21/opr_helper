@@ -1,23 +1,33 @@
 from __future__ import annotations
 
+from math import ceil
 from typing import Any
+from collections import Counter, defaultdict
 
-from army_books.models import UnitWeaponSlot
+from lists.loadouts import selected_or_default_slot, selected_upgrade_cost
 from lists.models import ArmyList, ListUnit
 
 
-def selected_or_default_slot(entry: ListUnit) -> UnitWeaponSlot | None:
-    if entry.selected_weapon_slot_id:
-        return entry.selected_weapon_slot
-
-    slots = list(entry.unit.weapon_slots.all())
-    return next((slot for slot in slots if slot.is_default), None) or (slots[0] if slots else None)
+def unit_selection_points(
+    *,
+    unit: Any,
+    model_count: int,
+    upgrade_cost: int = 0,
+    combined_count: int = 1,
+) -> int:
+    default_models = max(1, int(getattr(unit, "default_models", 1) or 1))
+    base_points = ceil(int(unit.points) * max(1, model_count) / default_models)
+    return (base_points + upgrade_cost) * max(1, combined_count)
 
 
 def list_unit_points(entry: ListUnit) -> int:
-    slot = selected_or_default_slot(entry)
-    upgrade_cost = slot.upgrade_cost if slot else 0
-    return entry.unit.points * entry.model_count + upgrade_cost
+    upgrade_cost = selected_upgrade_cost(entry)
+    return unit_selection_points(
+        unit=entry.unit,
+        model_count=entry.model_count,
+        upgrade_cost=upgrade_cost,
+        combined_count=entry.combined_from_count,
+    )
 
 
 def army_list_points(army_list: ArmyList) -> int:
@@ -27,15 +37,53 @@ def army_list_points(army_list: ArmyList) -> int:
 def validate_model_count(unit: Any, model_count: int) -> str | None:
     if model_count < unit.min_models:
         return f"Model count must be at least {unit.min_models}."
-    if unit.max_models is not None and model_count > unit.max_models:
-        return f"Model count must be at most {unit.max_models}."
+    max_models = effective_max_models(unit)
+    if model_count > max_models:
+        return f"Model count must be at most {max_models}."
+    return None
+
+
+def effective_max_models(unit: Any) -> int:
+    return int(unit.max_models or unit.default_models or unit.min_models or 1)
+
+
+def is_hero(unit: Any) -> bool:
+    return _has_rule(unit.special_rules, "Hero")
+
+
+def can_host_hero(entry: ListUnit) -> bool:
+    return entry.model_count > 1 and not is_hero(entry.unit)
+
+
+def validate_parent_entry(entry: ListUnit, parent_entry: ListUnit | None) -> str | None:
+    if parent_entry is None:
+        return None
+    if parent_entry.army_list_id != entry.army_list_id:
+        return "Embedded heroes must join a unit in the same army list."
+    if parent_entry.id == entry.id:
+        return "A unit cannot embed into itself."
+    if not is_hero(entry.unit):
+        return "Only heroes can be embedded with units."
+    if entry.unit.tough > 6:
+        return "Only heroes up to Tough(6) can be embedded with units."
+    if not can_host_hero(parent_entry):
+        return "Heroes can only be embedded with multi-model non-hero units."
+    existing_hero = (
+        ListUnit.objects.filter(parent_entry=parent_entry)
+        .exclude(id=entry.id)
+        .select_related("unit")
+        .first()
+    )
+    if existing_hero is not None:
+        return f"{parent_entry.unit.name} already has an embedded hero."
     return None
 
 
 def army_list_validation(army_list: ArmyList) -> dict[str, list[dict[str, Any]]]:
     errors: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []
-    total_points = army_list_points(army_list)
+    entries = list(army_list.units.all())
+    total_points = sum(list_unit_points(entry) for entry in entries)
 
     if army_list.point_limit > 0 and total_points > army_list.point_limit:
         errors.append(
@@ -45,7 +93,7 @@ def army_list_validation(army_list: ArmyList) -> dict[str, list[dict[str, Any]]]
             }
         )
 
-    for entry in army_list.units.all():
+    for entry in entries:
         if entry.unit.faction_id != army_list.faction_id:
             errors.append(
                 {
@@ -83,4 +131,99 @@ def army_list_validation(army_list: ArmyList) -> dict[str, list[dict[str, Any]]]
                 }
             )
 
+        if entry.combined_from_count < 1:
+            errors.append(
+                {
+                    "code": "invalid_combined_count",
+                    "list_unit_id": entry.id,
+                    "message": f"{entry.unit.name} combined unit count must be at least 1.",
+                }
+            )
+        if entry.combined_from_count > 1 and entry.model_count <= 1:
+            errors.append(
+                {
+                    "code": "invalid_combined_unit",
+                    "list_unit_id": entry.id,
+                    "message": f"{entry.unit.name} can only be combined when it has multiple models.",
+                }
+            )
+
+        parent_error = validate_parent_entry(entry, entry.parent_entry)
+        if parent_error:
+            errors.append(
+                {
+                    "code": "invalid_embedded_hero",
+                    "list_unit_id": entry.id,
+                    "message": f"{entry.unit.name}: {parent_error}",
+                }
+            )
+
+    errors.extend(_force_org_errors(army_list, entries))
     return {"errors": errors, "warnings": warnings}
+
+
+def _force_org_errors(army_list: ArmyList, entries: list[ListUnit]) -> list[dict[str, Any]]:
+    if army_list.point_limit <= 0:
+        return []
+
+    errors: list[dict[str, Any]] = []
+    hero_count = sum(1 for entry in entries if is_hero(entry.unit))
+    hero_limit = max(1, army_list.point_limit // 500)
+    if hero_count > hero_limit:
+        errors.append(
+            {
+                "code": "too_many_heroes",
+                "message": f"Force organization allows at most {hero_limit} heroes at {army_list.point_limit} pts.",
+            }
+        )
+
+    max_copies = 1 + army_list.point_limit // 750
+    unit_copies = Counter()
+    for entry in entries:
+        unit_copies[entry.unit_id] += max(1, entry.combined_from_count)
+    for unit_id, copies in unit_copies.items():
+        if copies > max_copies:
+            unit_name = next(entry.unit.name for entry in entries if entry.unit_id == unit_id)
+            errors.append(
+                {
+                    "code": "too_many_unit_copies",
+                    "unit_id": unit_id,
+                    "message": f"{unit_name} appears {copies} times; force organization allows {max_copies}.",
+                }
+            )
+
+    max_groups = army_list.point_limit // 150
+    effective_groups = sum(1 for entry in entries if entry.parent_entry_id is None)
+    if effective_groups > max_groups:
+        errors.append(
+            {
+                "code": "too_many_units",
+                "message": f"Force organization allows at most {max_groups} effective units at {army_list.point_limit} pts.",
+            }
+        )
+
+    child_points: dict[int, int] = defaultdict(int)
+    for entry in entries:
+        if entry.parent_entry_id:
+            child_points[entry.parent_entry_id] += list_unit_points(entry)
+    point_cap = army_list.point_limit * 0.35
+    for entry in entries:
+        if entry.parent_entry_id:
+            continue
+        group_points = list_unit_points(entry) + child_points[entry.id]
+        if group_points > point_cap:
+            errors.append(
+                {
+                    "code": "unit_group_over_point_share",
+                    "list_unit_id": entry.id,
+                    "message": f"{entry.unit.name} group is {group_points} pts, over the 35% force organization cap.",
+                }
+            )
+
+    return errors
+
+
+def _has_rule(rules: dict[str, Any] | None, name: str) -> bool:
+    if not rules:
+        return False
+    return any(key.lower() == name.lower() for key in rules)

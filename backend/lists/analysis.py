@@ -4,8 +4,9 @@ from dataclasses import dataclass
 from typing import Any
 
 from army_books.calc.engine import calculate_distribution, calculate_ev
+from lists.loadouts import EffectiveLoadout, effective_loadout, split_aura_rules
 from lists.models import ArmyList, ListUnit
-from lists.validation import list_unit_points, selected_or_default_slot
+from lists.validation import list_unit_points
 
 
 DEFAULT_TARGETS = (
@@ -65,7 +66,18 @@ def validate_targets(raw_targets: Any) -> tuple[list[TargetProfile], dict[str, s
 
 
 def analyze_army_list(army_list: ArmyList, targets: list[TargetProfile]) -> dict[str, Any]:
-    unit_results = [_analyze_list_unit(entry, targets) for entry in army_list.units.all()]
+    entries = list(army_list.units.all())
+    loadouts = {entry.id: effective_loadout(entry) for entry in entries}
+    child_aura_rules = _embedded_aura_rules(entries, loadouts)
+    unit_results = [
+        _analyze_list_unit(
+            entry=entry,
+            targets=targets,
+            loadout=loadouts[entry.id],
+            embedded_aura_rules=child_aura_rules.get(entry.id, {}),
+        )
+        for entry in entries
+    ]
     totals = [_total_for_target(target, unit_results) for target in targets]
 
     return {
@@ -79,21 +91,27 @@ def analyze_army_list(army_list: ArmyList, targets: list[TargetProfile]) -> dict
 def _analyze_list_unit(
     entry: ListUnit,
     targets: list[TargetProfile],
+    loadout: EffectiveLoadout,
+    embedded_aura_rules: dict[str, Any],
 ) -> dict[str, Any] | None:
-    slot = selected_or_default_slot(entry)
-    if slot is None:
+    if not loadout.weapons:
         return None
 
-    weapon = slot.weapon
     points = list_unit_points(entry)
-    special_rules = {**entry.unit.special_rules, **weapon.special_rules}
+    unit_rules, unit_aura_rules = split_aura_rules(entry.unit.special_rules)
+    applicable_rules = {
+        **unit_rules,
+        **loadout.extra_rules,
+        **unit_aura_rules,
+        **loadout.aura_rules,
+        **embedded_aura_rules,
+    }
     target_results = [
         _target_result(
             target=target,
-            attacks=weapon.attacks * entry.model_count,
-            quality=entry.unit.quality,
-            ap=weapon.ap,
-            special_rules=special_rules,
+            entry=entry,
+            weapons=loadout.weapons,
+            extra_rules=applicable_rules,
             points=points,
         )
         for target in targets
@@ -105,33 +123,72 @@ def _analyze_list_unit(
         "unit_name": entry.unit.name,
         "model_count": entry.model_count,
         "points": points,
-        "weapon_id": weapon.id,
-        "weapon_name": weapon.name,
+        "effective_wounds_per_100_points": effective_wounds_per_100_points(entry, points),
+        "weapon_id": loadout.weapons[0].id,
+        "weapon_name": loadout.summary,
+        "weapon_names": loadout.weapon_names,
         "target_results": target_results,
     }
 
 
+def _embedded_aura_rules(
+    entries: list[ListUnit],
+    loadouts: dict[int, EffectiveLoadout],
+) -> dict[int, dict[str, Any]]:
+    rules_by_parent: dict[int, dict[str, Any]] = {}
+    for entry in entries:
+        if entry.parent_entry_id is None:
+            continue
+        _normal_rules, unit_aura_rules = split_aura_rules(entry.unit.special_rules)
+        loadout = loadouts[entry.id]
+        rules_by_parent[entry.parent_entry_id] = {
+            **rules_by_parent.get(entry.parent_entry_id, {}),
+            **unit_aura_rules,
+            **loadout.aura_rules,
+        }
+    return rules_by_parent
+
+
+def effective_wounds_per_100_points(entry: ListUnit, points: int) -> float:
+    if points <= 0:
+        return 0
+    total_wounds = entry.model_count * max(1, entry.unit.tough) * max(1, entry.combined_from_count)
+    failed_save_rate = max(1, entry.unit.defense - 1) / 6
+    effective_wounds = total_wounds / failed_save_rate
+    return round((effective_wounds / points) * 100, 6)
+
+
 def _target_result(
     target: TargetProfile,
-    attacks: float,
-    quality: int,
-    ap: int,
-    special_rules: dict[str, Any],
+    entry: ListUnit,
+    weapons: list[Any],
+    extra_rules: dict[str, Any],
     points: int,
 ) -> dict[str, float | str]:
-    ev = calculate_ev(attacks, quality, target.defense, ap, special_rules)
-    distribution = calculate_distribution(attacks, quality, target.defense, ap, special_rules)
-    p_kill_model = sum(
-        point["probability"]
-        for point in distribution
-        if int(point["wounds"]) >= target.tough
-    )
+    ev = 0.0
+    p_kill_model = 0.0
+    for weapon in weapons:
+        attacks = weapon.attacks * entry.model_count
+        special_rules = {**extra_rules, **weapon.special_rules}
+        ev += calculate_ev(attacks, entry.unit.quality, target.defense, weapon.ap, special_rules)
+        distribution = calculate_distribution(
+            attacks,
+            entry.unit.quality,
+            target.defense,
+            weapon.ap,
+            special_rules,
+        )
+        p_kill_model += sum(
+            point["probability"]
+            for point in distribution
+            if int(point["wounds"]) >= target.tough
+        )
 
     return {
         "target_id": target.id,
         "ev": round(ev, 6),
         "wounds_per_100_points": round((ev / points) * 100, 6) if points > 0 else 0,
-        "p_kill_model": round(p_kill_model, 6),
+        "p_kill_model": round(min(1, p_kill_model), 6),
     }
 
 

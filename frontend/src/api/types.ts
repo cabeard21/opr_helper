@@ -28,6 +28,27 @@ export type UnitWeaponSlot = {
   weapon: Weapon
   is_default: boolean
   upgrade_cost: number
+  option_id: string | null
+  upgrade_id: string | null
+}
+
+export type UnitUpgradeOption = {
+  id: number
+  option_uid: string
+  label: string
+  cost: number
+  gains: Record<string, unknown>[]
+  weapons: Weapon[]
+}
+
+export type UnitUpgradeSection = {
+  id: number
+  package_uid: string
+  section_uid: string
+  label: string
+  variant: string
+  targets: string[]
+  options: UnitUpgradeOption[]
 }
 
 export type Unit = {
@@ -39,11 +60,12 @@ export type Unit = {
   tough: number
   points: number
   min_models: number
-  max_models: number | null
+  max_models: number
   default_models: number
   special_rules: Record<string, unknown>
   source_uid: string | null
   weapon_slots: UnitWeaponSlot[]
+  upgrade_sections: UnitUpgradeSection[]
 }
 
 export type ListValidationMessage = {
@@ -65,6 +87,11 @@ export type ListUnit = {
   model_count: number
   selected_weapon_slot: number | null
   selected_weapon_name: string | null
+  selected_upgrades: number[]
+  loadout_weapon_names: string[]
+  loadout_summary: string
+  parent_entry: number | null
+  combined_from_count: number
   notes: string
   total_points: number
 }
@@ -74,6 +101,11 @@ export type ArmyList = {
   name: string
   faction: number
   point_limit: number
+  advisor_archetype: string
+  advisor_playstyle: string
+  advisor_strategy_summary: string
+  advisor_prompt: string
+  advisor_warnings: string[]
   created_at: string
   updated_at: string
   units: ListUnit[]
@@ -91,26 +123,79 @@ export type AddListUnitInput = {
   unit: number
   model_count: number
   selected_weapon_slot?: number | null
+  selected_upgrades?: number[]
   notes?: string
 }
 
 export type UpdateListUnitInput = Partial<{
   model_count: number
   selected_weapon_slot: number | null
+  selected_upgrades: number[]
+  parent_entry: number | null
+  combined_from_count: number
   notes: string
 }>
+
+export type ArmyForgeExport = {
+  id: string
+  list: {
+    id: string
+    key: string
+    name: string
+    units: Array<{
+      id: string
+      xp: number
+      notes: string | null
+      armyId: string
+      traits: unknown[]
+      combined: boolean
+      joinToUnit: string | null
+      selectionId: string
+      selectedUpgrades: Array<{
+        optionId: string
+        upgradeId: string
+        instanceId: string
+      }>
+    }>
+    isCloud: boolean
+    forceOrg: boolean
+    modified: string
+    gameSystem: string
+    modelCount: number
+    simpleMode: boolean
+    description: string
+    pointsLimit: number
+    campaignMode: boolean
+    cloudModified: string
+    narrativeMode: boolean
+    activationCount: number
+  }
+  armyId: string
+  armyIds: string[]
+  armyName: string
+  modified: string
+  favourite: boolean
+  gameSystem: string
+  listPoints: number
+  armyFaction: string | null
+  saveVersion: number
+  armyVersions: Array<{ armyId: string; version: string }>
+}
 
 export type AdvisorSuggestionInput = {
   faction: number
   point_limit: number
   prompt: string
   dry_run: boolean
+  suggestion?: ListSuggestion
 }
 
 export type SuggestedUnit = {
   unit_id: number
   unit_name: string
   model_count: number
+  selected_upgrade_ids: number[]
+  parent_unit_index?: number | null
   justification: string
 }
 
@@ -178,8 +263,10 @@ export type ListAnalysisUnit = {
   unit_name: string
   model_count: number
   points: number
+  effective_wounds_per_100_points: number
   weapon_id: number
   weapon_name: string
+  weapon_names?: string[]
   target_results: UnitTargetResult[]
 }
 

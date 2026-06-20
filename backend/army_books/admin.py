@@ -25,6 +25,6 @@ class WeaponAdmin(admin.ModelAdmin):
 
 @admin.register(UnitWeaponSlot)
 class UnitWeaponSlotAdmin(admin.ModelAdmin):
-    list_display = ("unit", "weapon", "is_default", "upgrade_cost")
+    list_display = ("unit", "weapon", "is_default", "upgrade_cost", "option_id", "upgrade_id")
     list_filter = ("is_default", "unit__faction")
-    search_fields = ("unit__name", "weapon__name")
+    search_fields = ("unit__name", "weapon__name", "option_id", "upgrade_id")

@@ -48,6 +48,7 @@ class ArmyBooksApiTests(TestCase):
         unit = response.json()["data"][0]
         self.assertEqual(unit["name"], "Paladins")
         self.assertEqual(unit["weapon_slots"][0]["weapon"]["name"], "Great Weapon")
+        self.assertEqual(unit["max_models"], 1)
 
     def test_unit_detail_endpoint_returns_single_unit(self):
         response = self.client.get(f"/api/units/{self.unit.id}/")

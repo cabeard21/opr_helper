@@ -28,7 +28,10 @@ def faction_units(_request, faction_id: int):
         return envelope(None, "Faction not found.", status.HTTP_404_NOT_FOUND)
 
     units = (
-        faction.units.prefetch_related("weapon_slots__weapon")
+        faction.units.prefetch_related(
+            "weapon_slots__weapon",
+            "upgrade_sections__options__weapons",
+        )
         .all()
         .order_by("name")
     )
@@ -38,7 +41,10 @@ def faction_units(_request, faction_id: int):
 @api_view(["GET"])
 def unit_detail(_request, unit_id: int):
     try:
-        unit = Unit.objects.prefetch_related("weapon_slots__weapon").get(id=unit_id)
+        unit = Unit.objects.prefetch_related(
+            "weapon_slots__weapon",
+            "upgrade_sections__options__weapons",
+        ).get(id=unit_id)
     except Unit.DoesNotExist:
         return envelope(None, "Unit not found.", status.HTTP_404_NOT_FOUND)
 

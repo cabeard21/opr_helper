@@ -112,7 +112,7 @@ def parse_weapon(raw: dict[str, Any]) -> dict[str, Any]:
     attacks_string = _attacks_string(raw_attacks)
     raw_rules = _first(raw, "special_rules", "specialRules", "rules", default=[])
     return {
-        "source_uid": _first(raw, "source_uid", "uid", "id"),
+        "source_uid": _first(raw, "source_uid", "uid", "id", "weaponId"),
         "name": raw["name"],
         "range": parse_stat_target(_first(raw, "range", "range_", default=0)),
         "attacks": parse_attacks_value(attacks_string),

@@ -6,6 +6,7 @@ import { apiClient } from './client'
 vi.mock('axios', () => ({
   default: {
     create: vi.fn(),
+    isAxiosError: vi.fn(),
   },
 }))
 
@@ -16,6 +17,7 @@ afterEach(() => {
   getRequest.mockReset()
   postRequest.mockReset()
   vi.mocked(axios.create).mockReset()
+  vi.mocked(axios.isAxiosError).mockReset()
 })
 
 describe('apiClient', () => {
@@ -34,6 +36,22 @@ describe('apiClient', () => {
     getRequest.mockResolvedValue({ data: { data: null, error: 'Faction not found.' } })
 
     await expect(apiClient.getFactionUnits(99)).rejects.toThrow('Faction not found.')
+  })
+
+  it('throws envelope errors from non-2xx Axios responses', async () => {
+    const error = {
+      response: {
+        data: {
+          data: null,
+          error: 'Army Forge export requires native upgrade IDs. Re-sync army books before exporting.',
+        },
+      },
+    }
+    vi.mocked(axios.create).mockReturnValue({ get: getRequest } as never)
+    vi.mocked(axios.isAxiosError).mockReturnValue(true)
+    getRequest.mockRejectedValue(error)
+
+    await expect(apiClient.exportArmyForgeList(1)).rejects.toThrow('Re-sync army books')
   })
 
   it('posts calculation requests and unwraps successful results', async () => {

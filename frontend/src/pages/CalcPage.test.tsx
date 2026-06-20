@@ -46,7 +46,7 @@ const paladins: Unit = {
   tough: 3,
   points: 180,
   min_models: 1,
-  max_models: null,
+  max_models: 1,
   default_models: 1,
   special_rules: { Fearless: true },
   source_uid: 'unit-10',
@@ -55,6 +55,8 @@ const paladins: Unit = {
       id: 20,
       is_default: true,
       upgrade_cost: 0,
+      option_id: null,
+      upgrade_id: null,
       weapon: {
         id: 30,
         name: 'Great Weapon',
@@ -67,6 +69,7 @@ const paladins: Unit = {
       },
     },
   ],
+  upgrade_sections: [],
 }
 
 const calcResult: CalcResult = {
