@@ -74,6 +74,7 @@ describe('apiClient', () => {
       weapon_id: 30,
       target: { defense: 4, tough: 3 },
       modifiers: { stealth: true, indirect: false },
+      combat_context: { charging: true, target_over_9: false },
     })
 
     expect(result.ev).toBe(1.25)
@@ -82,6 +83,7 @@ describe('apiClient', () => {
       weapon_id: 30,
       target: { defense: 4, tough: 3 },
       modifiers: { stealth: true, indirect: false },
+      combat_context: { charging: true, target_over_9: false },
     })
   })
 

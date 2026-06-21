@@ -31,6 +31,10 @@ class AdvisorPackageTests(TestCase):
         self.assertEqual(package.package_id, f"u{unit.id}-base")
         self.assertEqual(package.model_count, 5)
         self.assertEqual(package.points, 120)
+        self.assertEqual(package.ev_infantry, 5.0)
+        self.assertEqual(package.ev_elite, 3.333333)
+        self.assertEqual(package.ev_monster, 2.5)
+        self.assertEqual(package.wounds_per_100pts_infantry, 4.166667)
         self.assertEqual(package.selected_upgrade_ids, [])
         self.assertIn("mobility", package.role_tags)
         self.assertIn("core", package.role_tags)
@@ -65,12 +69,38 @@ class AdvisorPackageTests(TestCase):
         table = build_package_table(build_advisor_packages(self.faction.id, point_limit=750))
 
         self.assertIn(
-            "| Package | Unit | Pts | Models | Q | Def | T | AP | Upgrades | Roles | Aura | Embed | Legal |",
+            "| Package | Unit | Pts | Models | Q | Def | T | AP | EV_inf | EV_eli | EV_mon | W100 | Upgrades | Roles | Aura | Embed | Legal |",
             table,
         )
         self.assertIn("u", table)
+        self.assertIn("| 1.00 | 0.67 | 0.50 | 1.00 |", table)
         self.assertIn("mobility", table)
         self.assertIn("ok", table)
+
+    def test_package_offense_uses_melee_charge_context(self):
+        melee_weapon = Weapon.objects.create(
+            name="Furious Claws",
+            range=0,
+            attacks=6,
+            attacks_string="A6",
+            ap=0,
+            special_rules={"Furious": True, "Impact": 2},
+        )
+        ranged_weapon = Weapon.objects.create(
+            name="Furious Bow",
+            range=18,
+            attacks=6,
+            attacks_string="A6",
+            ap=0,
+            special_rules={"Furious": True, "Impact": 2},
+        )
+        melee_unit = self._unit(name="Furious Infantry", points=100, weapon=melee_weapon)
+        ranged_unit = self._unit(name="Furious Archers", points=100, weapon=ranged_weapon)
+
+        packages = {package.unit_id: package for package in build_advisor_packages(self.faction.id, point_limit=750)}
+
+        self.assertEqual(packages[melee_unit.id].ev_infantry, 3.777778)
+        self.assertEqual(packages[ranged_unit.id].ev_infantry, 2.0)
 
     def test_packages_mark_aura_upgrades_and_embedding_roles(self):
         host = self._unit(
@@ -118,6 +148,7 @@ class AdvisorPackageTests(TestCase):
         max_models: int | None = 1,
         default_models: int = 1,
         special_rules=None,
+        weapon: Weapon | None = None,
     ) -> Unit:
         unit = Unit.objects.create(
             faction=self.faction,
@@ -131,5 +162,5 @@ class AdvisorPackageTests(TestCase):
             default_models=default_models,
             special_rules=special_rules or {},
         )
-        UnitWeaponSlot.objects.create(unit=unit, weapon=self.weapon, is_default=True)
+        UnitWeaponSlot.objects.create(unit=unit, weapon=weapon or self.weapon, is_default=True)
         return unit

@@ -3,7 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from army_books.calc.engine import calculate_ev
 from army_books.models import Unit, UnitUpgradeOption
+from lists.analysis import DEFAULT_TARGETS, TargetProfile, weapon_combat_context
 from lists.loadouts import aura_rule_names_from_gains, split_aura_rules
 from lists.validation import effective_max_models, is_hero, unit_selection_points
 
@@ -21,6 +23,10 @@ class AdvisorPackage:
     defense: int
     tough: int
     max_ap: int
+    ev_infantry: float
+    ev_elite: float
+    ev_monster: float
+    wounds_per_100pts_infantry: float
     role_tags: tuple[str, ...]
     aura_rules: tuple[str, ...]
     can_embed_as_hero: bool
@@ -55,13 +61,14 @@ def build_advisor_packages(faction_id: int, point_limit: int) -> list[AdvisorPac
 
 def build_package_table(packages: list[AdvisorPackage]) -> str:
     lines = [
-        "| Package | Unit | Pts | Models | Q | Def | T | AP | Upgrades | Roles | Aura | Embed | Legal |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| Package | Unit | Pts | Models | Q | Def | T | AP | EV_inf | EV_eli | EV_mon | W100 | Upgrades | Roles | Aura | Embed | Legal |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for package in packages:
         lines.append(
             "| {package_id} | {unit} | {points} | {models} | {quality}+ | {defense}+ | "
-            "{tough} | {ap} | {upgrades} | {roles} | {aura} | {embed} | {legal} |".format(
+            "{tough} | {ap} | {ev_inf:.2f} | {ev_eli:.2f} | {ev_mon:.2f} | {w100:.2f} | "
+            "{upgrades} | {roles} | {aura} | {embed} | {legal} |".format(
                 package_id=package.package_id,
                 unit=_compact(package.unit_name, 36),
                 points=package.points,
@@ -70,6 +77,10 @@ def build_package_table(packages: list[AdvisorPackage]) -> str:
                 defense=package.defense,
                 tough=package.tough,
                 ap=package.max_ap,
+                ev_inf=package.ev_infantry,
+                ev_eli=package.ev_elite,
+                ev_mon=package.ev_monster,
+                w100=package.wounds_per_100pts_infantry,
                 upgrades=_compact(", ".join(package.upgrade_labels), 60) if package.upgrade_labels else "-",
                 roles=", ".join(package.role_tags),
                 aura=_compact(", ".join(package.aura_rules), 48) if package.aura_rules else "-",
@@ -114,6 +125,7 @@ def _package_for_unit(
 ) -> AdvisorPackage:
     model_count = _default_model_count(unit)
     points = unit_selection_points(unit=unit, model_count=model_count, upgrade_cost=upgrade_cost)
+    target_results = _target_scores(unit, model_count, points)
     return AdvisorPackage(
         package_id=f"u{unit.id}-{package_suffix}",
         unit_id=unit.id,
@@ -126,6 +138,10 @@ def _package_for_unit(
         defense=unit.defense,
         tough=unit.tough,
         max_ap=_max_ap(unit),
+        ev_infantry=target_results["infantry"]["ev"],
+        ev_elite=target_results["elite"]["ev"],
+        ev_monster=target_results["monster"]["ev"],
+        wounds_per_100pts_infantry=target_results["infantry"]["wounds_per_100_points"],
         role_tags=_role_tags(unit, points, point_limit),
         aura_rules=_aura_rules(unit, selected_upgrade_ids or []),
         can_embed_as_hero=_can_embed_as_hero(unit),
@@ -148,6 +164,44 @@ def _default_model_count(unit: Unit) -> int:
 
 def _max_ap(unit: Unit) -> int:
     return max((slot.weapon.ap for slot in unit.weapon_slots.all() if slot.is_default), default=0)
+
+
+def _target_scores(unit: Unit, model_count: int, points: int) -> dict[str, dict[str, float]]:
+    targets = [
+        TargetProfile(
+            id=str(raw["id"]),
+            name=str(raw["name"]),
+            defense=int(raw["defense"]),
+            tough=int(raw["tough"]),
+        )
+        for raw in DEFAULT_TARGETS
+    ]
+    return {
+        target.id: _target_score(unit, model_count, points, target)
+        for target in targets
+    }
+
+
+def _target_score(unit: Unit, model_count: int, points: int, target: TargetProfile) -> dict[str, float]:
+    ev = 0.0
+    for slot in unit.weapon_slots.all():
+        if not slot.is_default:
+            continue
+        weapon = slot.weapon
+        attacks = weapon.attacks * model_count
+        special_rules = {**unit.special_rules, **weapon.special_rules}
+        ev += calculate_ev(
+            attacks,
+            unit.quality,
+            target.defense,
+            weapon.ap,
+            special_rules,
+            combat_context=weapon_combat_context(weapon, model_count),
+        )
+    return {
+        "ev": round(ev, 6),
+        "wounds_per_100_points": round((ev / points) * 100, 6) if points > 0 else 0,
+    }
 
 
 def _role_tags(unit: Unit, points: int, point_limit: int) -> tuple[str, ...]:

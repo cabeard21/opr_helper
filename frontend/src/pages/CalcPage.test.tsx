@@ -113,6 +113,7 @@ describe('CalcPage', () => {
         weapon_id: 30,
         target: { defense: 5, tough: 1 },
         modifiers: { stealth: false, indirect: false },
+        combat_context: { charging: false, target_over_9: false },
       })
     })
     expect(await screen.findByText('3.33')).toBeInTheDocument()
@@ -133,6 +134,30 @@ describe('CalcPage', () => {
       expect(within(attackerPanel).getByLabelText(/faction/i)).toHaveValue('1')
       expect(within(attackerPanel).getByLabelText(/unit/i)).toHaveValue('10')
       expect(within(attackerPanel).getByLabelText(/weapon/i)).toHaveValue('30')
+    })
+  })
+
+  it('sends selected combat context controls with calculation requests', async () => {
+    const user = userEvent.setup()
+    vi.mocked(apiClient.getFactions).mockResolvedValue(factions)
+    vi.mocked(apiClient.getFactionUnits).mockResolvedValue([paladins])
+    vi.mocked(apiClient.calculateEv).mockResolvedValue(calcResult)
+
+    renderCalcPage()
+
+    await user.selectOptions(await screen.findByLabelText(/faction/i), '1')
+    await user.selectOptions(await screen.findByLabelText(/unit/i), '10')
+    await user.selectOptions(await screen.findByLabelText(/weapon/i), '30')
+    await user.click(screen.getByLabelText(/charging/i))
+    await user.click(screen.getByLabelText(/target over 9/i))
+    await user.click(screen.getByRole('button', { name: /calculate/i }))
+
+    await waitFor(() => {
+      expect(apiClient.calculateEv).toHaveBeenCalledWith(
+        expect.objectContaining({
+          combat_context: { charging: true, target_over_9: true },
+        }),
+      )
     })
   })
 })

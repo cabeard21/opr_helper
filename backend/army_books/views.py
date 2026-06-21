@@ -57,6 +57,13 @@ def calculate_ev_view(request):
     weapon_id = request.data.get("weapon_id")
     target = request.data.get("target") or {}
     modifiers = request.data.get("modifiers") or {}
+    combat_context = request.data.get("combat_context") or {}
+    if not isinstance(combat_context, dict):
+        return envelope(
+            None,
+            "Combat context must be an object.",
+            status.HTTP_400_BAD_REQUEST,
+        )
 
     try:
         unit = Unit.objects.get(id=unit_id)
@@ -78,7 +85,20 @@ def calculate_ev_view(request):
             status.HTTP_400_BAD_REQUEST,
         )
 
+    target_special_rules = target.get("special_rules") or {}
+    if not isinstance(target_special_rules, dict):
+        return envelope(
+            None,
+            "Target special_rules must be an object.",
+            status.HTTP_400_BAD_REQUEST,
+        )
+
     special_rules = {**unit.special_rules, **weapon.special_rules}
+    effective_combat_context = {
+        **combat_context,
+        "is_melee": weapon.range == 0,
+        "attacking_models": 1,
+    }
     ev = calculate_ev(
         weapon.attacks,
         unit.quality,
@@ -86,6 +106,8 @@ def calculate_ev_view(request):
         weapon.ap,
         special_rules,
         modifiers=modifiers,
+        target_special_rules=target_special_rules,
+        combat_context=effective_combat_context,
     )
     distribution = calculate_distribution(
         weapon.attacks,
@@ -94,6 +116,8 @@ def calculate_ev_view(request):
         weapon.ap,
         special_rules,
         modifiers=modifiers,
+        target_special_rules=target_special_rules,
+        combat_context=effective_combat_context,
     )
     p_zero = _probability_at_least(distribution, 0)
     p_kill = _probability_at_least(distribution, target_tough)

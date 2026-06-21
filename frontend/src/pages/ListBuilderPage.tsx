@@ -12,6 +12,8 @@ const TARGET_PROFILES: TargetProfile[] = [
   { id: 'monster', name: 'Monster', defense: 2, tough: 10 },
 ]
 
+const EMPTY_UNITS: Unit[] = []
+
 export function ListBuilderPage() {
   const { id } = useParams()
   const listId = Number(id)
@@ -19,7 +21,8 @@ export function ListBuilderPage() {
   const [armyList, setArmyList] = useState<ArmyList | null>(null)
   const [units, setUnits] = useState<Unit[]>([])
   const [error, setError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(!invalidListId)
+  const [loadedListId, setLoadedListId] = useState<number | null>(null)
+  const [errorListId, setErrorListId] = useState<number | null>(null)
   const [busyUnitId, setBusyUnitId] = useState<number | null>(null)
   const [activeTab, setActiveTab] = useState<'builder' | 'analysis'>('builder')
   const [analysis, setAnalysis] = useState<ListAnalysisResult | null>(null)
@@ -27,24 +30,50 @@ export function ListBuilderPage() {
   const [exportMessage, setExportMessage] = useState('')
 
   useEffect(() => {
+    let active = true
+
     if (invalidListId) {
-      return
+      return () => {
+        active = false
+      }
     }
 
     apiClient
       .getList(listId)
       .then(async (list) => {
-        setArmyList(list)
-        setUnits(await apiClient.getFactionUnits(list.faction))
+        const nextUnits = await apiClient.getFactionUnits(list.faction)
+        if (active) {
+          setArmyList(list)
+          setUnits(nextUnits)
+          setLoadedListId(listId)
+          setError(null)
+          setErrorListId(null)
+          setBusyUnitId(null)
+          setAnalysis(null)
+          setAnalysisLoading(false)
+          setExportMessage('')
+        }
       })
-      .catch((err: Error) => setError(err.message))
-      .finally(() => setLoading(false))
+      .catch((err: Error) => {
+        if (active) {
+          setError(err.message)
+          setErrorListId(listId)
+        }
+      })
+
+    return () => {
+      active = false
+    }
   }, [listId, invalidListId])
 
-  const unitLookup = useMemo(() => new Map(units.map((unit) => [unit.id, unit])), [units])
+  const currentArmyList = loadedListId === listId ? armyList : null
+  const currentUnits = loadedListId === listId ? units : EMPTY_UNITS
+  const displayError = errorListId === null || errorListId === listId ? error : null
+  const routeLoading = !invalidListId && loadedListId !== listId && errorListId !== listId
+  const unitLookup = useMemo(() => new Map(currentUnits.map((unit) => [unit.id, unit])), [currentUnits])
 
   async function loadAnalysis() {
-    if (!armyList || analysisLoading) {
+    if (!currentArmyList || analysisLoading) {
       return
     }
     setActiveTab('analysis')
@@ -54,7 +83,7 @@ export function ListBuilderPage() {
     setAnalysisLoading(true)
     setError(null)
     try {
-      setAnalysis(await apiClient.analyzeList(armyList.id, TARGET_PROFILES))
+      setAnalysis(await apiClient.analyzeList(currentArmyList.id, TARGET_PROFILES))
     } catch (err) {
       setError((err as Error).message)
     } finally {
@@ -63,14 +92,14 @@ export function ListBuilderPage() {
   }
 
   async function exportArmyForge() {
-    if (!armyList) {
+    if (!currentArmyList) {
       return
     }
     setError(null)
     setExportMessage('')
     try {
-      const payload = await apiClient.exportArmyForgeList(armyList.id)
-      const fileName = `${armyList.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') || 'army-list'}-army-forge.json`
+      const payload = await apiClient.exportArmyForgeList(currentArmyList.id)
+      const fileName = `${currentArmyList.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') || 'army-list'}-army-forge.json`
       const json = JSON.stringify(payload, null, 2)
       if (typeof Blob !== 'undefined' && typeof URL !== 'undefined' && URL.createObjectURL) {
         const url = URL.createObjectURL(new Blob([json], { type: 'application/json' }))
@@ -87,7 +116,7 @@ export function ListBuilderPage() {
   }
 
   async function addUnit(unit: Unit) {
-    if (!armyList) {
+    if (!currentArmyList) {
       return
     }
     const defaultSlot = unit.weapon_slots.find((slot) => slot.is_default) ?? unit.weapon_slots[0]
@@ -95,7 +124,7 @@ export function ListBuilderPage() {
     setError(null)
     try {
       setArmyList(
-        await apiClient.addListUnit(armyList.id, {
+        await apiClient.addListUnit(currentArmyList.id, {
           unit: unit.id,
           model_count: unit.default_models,
           selected_weapon_slot: defaultSlot?.id ?? null,
@@ -110,13 +139,13 @@ export function ListBuilderPage() {
   }
 
   async function updateModelCount(entry: ListUnit, nextCount: number) {
-    if (!armyList || nextCount < 1) {
+    if (!currentArmyList || nextCount < 1) {
       return
     }
     setBusyUnitId(entry.unit)
     setError(null)
     try {
-      setArmyList(await apiClient.updateListUnit(armyList.id, entry.id, { model_count: nextCount }))
+      setArmyList(await apiClient.updateListUnit(currentArmyList.id, entry.id, { model_count: nextCount }))
     } catch (err) {
       setError((err as Error).message)
     } finally {
@@ -125,13 +154,13 @@ export function ListBuilderPage() {
   }
 
   async function updateSelectedWeapon(entry: ListUnit, nextSlotId: number | null) {
-    if (!armyList) {
+    if (!currentArmyList) {
       return
     }
     setBusyUnitId(entry.unit)
     setError(null)
     try {
-      setArmyList(await apiClient.updateListUnit(armyList.id, entry.id, { selected_weapon_slot: nextSlotId }))
+      setArmyList(await apiClient.updateListUnit(currentArmyList.id, entry.id, { selected_weapon_slot: nextSlotId }))
     } catch (err) {
       setError((err as Error).message)
     } finally {
@@ -140,13 +169,13 @@ export function ListBuilderPage() {
   }
 
   async function updateSelectedUpgrades(entry: ListUnit, nextOptionIds: number[]) {
-    if (!armyList) {
+    if (!currentArmyList) {
       return
     }
     setBusyUnitId(entry.unit)
     setError(null)
     try {
-      setArmyList(await apiClient.updateListUnit(armyList.id, entry.id, { selected_upgrades: nextOptionIds }))
+      setArmyList(await apiClient.updateListUnit(currentArmyList.id, entry.id, { selected_upgrades: nextOptionIds }))
     } catch (err) {
       setError((err as Error).message)
     } finally {
@@ -155,13 +184,13 @@ export function ListBuilderPage() {
   }
 
   async function updateCombinedCount(entry: ListUnit, nextCount: number) {
-    if (!armyList || nextCount < 1) {
+    if (!currentArmyList || nextCount < 1) {
       return
     }
     setBusyUnitId(entry.unit)
     setError(null)
     try {
-      setArmyList(await apiClient.updateListUnit(armyList.id, entry.id, { combined_from_count: nextCount }))
+      setArmyList(await apiClient.updateListUnit(currentArmyList.id, entry.id, { combined_from_count: nextCount }))
     } catch (err) {
       setError((err as Error).message)
     } finally {
@@ -170,13 +199,13 @@ export function ListBuilderPage() {
   }
 
   async function updateParentEntry(entry: ListUnit, parentEntryId: number | null) {
-    if (!armyList) {
+    if (!currentArmyList) {
       return
     }
     setBusyUnitId(entry.unit)
     setError(null)
     try {
-      setArmyList(await apiClient.updateListUnit(armyList.id, entry.id, { parent_entry: parentEntryId }))
+      setArmyList(await apiClient.updateListUnit(currentArmyList.id, entry.id, { parent_entry: parentEntryId }))
     } catch (err) {
       setError((err as Error).message)
     } finally {
@@ -185,13 +214,13 @@ export function ListBuilderPage() {
   }
 
   async function removeUnit(entry: ListUnit) {
-    if (!armyList) {
+    if (!currentArmyList) {
       return
     }
     setBusyUnitId(entry.unit)
     setError(null)
     try {
-      setArmyList(await apiClient.removeListUnit(armyList.id, entry.id))
+      setArmyList(await apiClient.removeListUnit(currentArmyList.id, entry.id))
     } catch (err) {
       setError((err as Error).message)
     } finally {
@@ -199,18 +228,18 @@ export function ListBuilderPage() {
     }
   }
 
-  if (loading) {
+  if (routeLoading) {
     return <p className="app-muted">Loading army list...</p>
   }
 
-  if (!armyList) {
+  if (!currentArmyList) {
     return (
       <section>
         <Link className="app-link" to="/lists">
           Back to lists
         </Link>
         <p className="app-alert-danger mt-4">
-          {invalidListId ? 'Army list not found.' : (error ?? 'Army list not found.')}
+          {invalidListId ? 'Army list not found.' : (displayError ?? 'Army list not found.')}
         </p>
       </section>
     )
@@ -223,7 +252,7 @@ export function ListBuilderPage() {
           <Link className="app-link" to="/lists">
             Back to lists
           </Link>
-          <h1 className="app-heading mt-2">{armyList.name}</h1>
+          <h1 className="app-heading mt-2">{currentArmyList.name}</h1>
         </div>
         <div className="flex flex-wrap gap-2 rounded-md border p-1" style={{ background: 'var(--color-surface)', borderColor: 'var(--color-border)' }}>
           <button
@@ -249,31 +278,31 @@ export function ListBuilderPage() {
           </button>
         </div>
       </div>
-      {error ? <p className="app-alert-danger mb-4">{error}</p> : null}
+      {displayError ? <p className="app-alert-danger mb-4">{displayError}</p> : null}
       {exportMessage ? <p className="app-alert-warning mb-4 text-sm">{exportMessage}</p> : null}
-      <AdvisorListSummary armyList={armyList} />
+      <AdvisorListSummary armyList={currentArmyList} />
       {activeTab === 'analysis' ? (
-        <AnalysisPanel analysis={analysis} loading={analysisLoading} />
+        <AnalysisPanel analysis={analysis} armyList={currentArmyList} loading={analysisLoading} units={currentUnits} />
       ) : (
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_420px]">
         <div>
           <h2 className="app-subheading mb-3">Available units</h2>
           <div className="grid gap-4">
-            {units.map((unit) => (
+            {currentUnits.map((unit) => (
               <UnitCard key={unit.id} onAdd={addUnit} unit={unit} />
             ))}
           </div>
         </div>
         <aside className="lg:sticky lg:top-6 lg:self-start">
-          <PointTracker pointLimit={armyList.point_limit} totalPoints={armyList.total_points} />
-          <ListValidationMessages validation={armyList.validation} />
+          <PointTracker pointLimit={currentArmyList.point_limit} totalPoints={currentArmyList.total_points} />
+          <ListValidationMessages validation={currentArmyList.validation} />
           <div className="app-card mt-4">
             <h2 className="app-subheading">Selected units</h2>
             <div className="mt-4 grid gap-3">
-              {armyList.units.length === 0 ? (
+              {currentArmyList.units.length === 0 ? (
                 <p className="app-muted text-sm">No units added yet.</p>
               ) : null}
-              {armyList.units.map((entry) => (
+              {currentArmyList.units.map((entry) => (
                 <ListUnitRow
                   busy={busyUnitId === entry.unit}
                   entry={entry}
@@ -287,9 +316,9 @@ export function ListBuilderPage() {
                   onSelectWeapon={(slotId) => updateSelectedWeapon(entry, slotId)}
                   onSelectUpgrades={(optionIds) => updateSelectedUpgrades(entry, optionIds)}
                   unit={unitLookup.get(entry.unit)}
-                  armyUnits={armyList.units}
+                  armyUnits={currentArmyList.units}
                   unitLookup={unitLookup}
-                  factionId={armyList.faction}
+                  factionId={currentArmyList.faction}
                 />
               ))}
             </div>
@@ -560,14 +589,24 @@ function ListValidationMessages({ validation }: { validation?: ArmyList['validat
 
 type AnalysisPanelProps = {
   analysis: ListAnalysisResult | null
+  armyList: ArmyList
   loading: boolean
+  units: Unit[]
 }
 
 type AnalysisSort =
-  | { kind: 'unit' | 'durability'; direction: 'asc' | 'desc' }
+  | { kind: 'unit' | 'toughness' | 'durability'; direction: 'asc' | 'desc' }
   | { kind: 'ev' | 'efficiency'; targetId: string; direction: 'asc' | 'desc' }
 
-function AnalysisPanel({ analysis, loading }: AnalysisPanelProps) {
+type ListHealthMetric = {
+  id: string
+  label: string
+  score: number
+  status: 'Strong' | 'Watch' | 'Gap'
+  summary: string
+}
+
+function AnalysisPanel({ analysis, armyList, loading, units }: AnalysisPanelProps) {
   const [selectedTargetId, setSelectedTargetId] = useState(TARGET_PROFILES[0].id)
   const [sort, setSort] = useState<AnalysisSort>({
     kind: 'efficiency',
@@ -585,9 +624,13 @@ function AnalysisPanel({ analysis, loading }: AnalysisPanelProps) {
 
   const selectedTarget = analysis.targets.find((target) => target.id === selectedTargetId) ?? analysis.targets[0]
   const rankedUnits = [...analysis.units].sort(
-    (left, right) => resultFor(right, selectedTarget.id).wounds_per_100_points - resultFor(left, selectedTarget.id).wounds_per_100_points,
+    (left, right) => resultFor(right, selectedTarget.id).ev - resultFor(left, selectedTarget.id).ev,
   )
+  const toughnessUnits = [...analysis.units].sort((left, right) => right.effective_wounds - left.effective_wounds)
+  const maxSelectedEv = Math.max(0, ...rankedUnits.map((unit) => resultFor(unit, selectedTarget.id).ev))
+  const maxToughness = Math.max(0, ...toughnessUnits.map((unit) => unit.effective_wounds))
   const tableUnits = sortedAnalysisUnits(analysis.units, sort)
+  const healthMetrics = buildListHealthMetrics(armyList, units, analysis)
 
   function updateSort(nextSort: AnalysisSort) {
     setSort((current) => {
@@ -624,40 +667,55 @@ function AnalysisPanel({ analysis, loading }: AnalysisPanelProps) {
         </label>
       </div>
 
+      <ListHealthWeb metrics={healthMetrics} />
+
       <div className="grid gap-4 lg:grid-cols-3">
         {analysis.targets.map((target) => (
           <BestUnitCard analysis={analysis} key={target.id} target={target} />
         ))}
       </div>
 
-      <div className="app-card">
-        <h3 className="text-lg font-semibold" style={{ color: 'var(--color-text)' }}>Army vs {selectedTarget.name}</h3>
-        <div className="mt-4 grid gap-3">
-          {rankedUnits.map((unit) => {
-            const result = resultFor(unit, selectedTarget.id)
-            return (
-              <div key={unit.list_unit_id}>
-                <div className="flex items-center justify-between gap-3 text-sm">
-                  <span className="font-semibold" style={{ color: 'var(--color-text)' }}>{unit.unit_name}</span>
-                  <span className="app-muted">{result.ev.toFixed(2)} EV</span>
-                </div>
-                <div className="mt-1 h-2 overflow-hidden rounded" style={{ background: 'var(--color-bg-soft)' }}>
-                  <div
-                    className="h-full"
-                    style={{
-                      background: 'var(--color-accent)',
-                      width: `${Math.min(100, result.wounds_per_100_points * 30)}%`,
-                    }}
-                  />
-                </div>
-              </div>
-            )
-          })}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="app-card">
+          <h3 className="text-lg font-semibold" style={{ color: 'var(--color-text)' }}>Army vs {selectedTarget.name}</h3>
+          <div className="mt-4 grid gap-3">
+            {rankedUnits.map((unit) => {
+              const result = resultFor(unit, selectedTarget.id)
+              return (
+                <AnalysisBar
+                  accent="var(--color-accent)"
+                  key={unit.list_unit_id}
+                  label={unit.unit_name}
+                  maxValue={maxSelectedEv}
+                  meleeValue={result.melee_ev}
+                  rangedValue={result.ranged_ev}
+                  value={result.ev}
+                  valueLabel={`${result.ev.toFixed(2)} total EV`}
+                />
+              )
+            })}
+          </div>
+        </div>
+
+        <div className="app-card">
+          <h3 className="text-lg font-semibold" style={{ color: 'var(--color-text)' }}>Toughness</h3>
+          <div className="mt-4 grid gap-3">
+            {toughnessUnits.map((unit) => (
+              <AnalysisBar
+                accent="var(--color-warning)"
+                key={unit.list_unit_id}
+                label={unit.unit_name}
+                maxValue={maxToughness}
+                value={unit.effective_wounds}
+                valueLabel={`${unit.effective_wounds.toFixed(2)} toughness`}
+              />
+            ))}
+          </div>
         </div>
       </div>
 
       <div className="overflow-x-auto rounded-md border shadow-sm" style={{ background: 'var(--color-surface-raised)', borderColor: 'var(--color-border)' }}>
-        <table className="w-full min-w-[720px] border-collapse text-sm">
+        <table className="w-full min-w-[820px] border-collapse text-sm">
           <thead className="text-left" style={{ background: 'var(--color-bg-soft)', color: 'var(--color-text-muted)' }}>
             <tr>
               <SortableHeader
@@ -667,9 +725,15 @@ function AnalysisPanel({ analysis, loading }: AnalysisPanelProps) {
                 onClick={() => updateSort({ kind: 'unit', direction: 'asc' })}
               />
               <SortableHeader
+                active={sort.kind === 'toughness'}
+                direction={sort.direction}
+                label="Toughness"
+                onClick={() => updateSort({ kind: 'toughness', direction: 'desc' })}
+              />
+              <SortableHeader
                 active={sort.kind === 'durability'}
                 direction={sort.direction}
-                label="Effective wounds / 100 pts"
+                label="Toughness / 100 pts"
                 onClick={() => updateSort({ kind: 'durability', direction: 'desc' })}
               />
               {analysis.targets.map((target) => (
@@ -700,6 +764,9 @@ function AnalysisPanel({ analysis, loading }: AnalysisPanelProps) {
               <tr className="border-t" key={unit.list_unit_id} style={{ borderColor: 'var(--color-border)' }}>
                 <td className="px-4 py-3 font-semibold" style={{ color: 'var(--color-text)' }}>{unit.unit_name}</td>
                 <td className="px-4 py-3" style={{ color: 'var(--color-text-muted)' }}>
+                  {unit.effective_wounds.toFixed(2)}
+                </td>
+                <td className="px-4 py-3" style={{ color: 'var(--color-text-muted)' }}>
                   {unit.effective_wounds_per_100_points.toFixed(2)}
                 </td>
                 {analysis.targets.map((target) => {
@@ -708,6 +775,9 @@ function AnalysisPanel({ analysis, loading }: AnalysisPanelProps) {
                     <td className="px-4 py-3" key={target.id} style={{ color: 'var(--color-text-muted)' }}>
                       <div className="font-semibold" style={{ color: 'var(--color-text)' }}>
                         {result.ev.toFixed(2)} EV
+                      </div>
+                      <div className="app-muted mt-1 text-xs">
+                        Ranged {result.ranged_ev.toFixed(2)} / Melee {result.melee_ev.toFixed(2)}
                       </div>
                       <div className="app-muted mt-1 text-xs">
                         {result.wounds_per_100_points.toFixed(2)} wounds / 100 pts
@@ -719,6 +789,216 @@ function AnalysisPanel({ analysis, loading }: AnalysisPanelProps) {
             ))}
           </tbody>
         </table>
+      </div>
+    </section>
+  )
+}
+
+function AnalysisBar({
+  accent,
+  label,
+  maxValue,
+  meleeValue,
+  rangedValue,
+  value,
+  valueLabel,
+}: {
+  accent: string
+  label: string
+  maxValue: number
+  meleeValue?: number
+  rangedValue?: number
+  value: number
+  valueLabel: string
+}) {
+  const width = maxValue > 0 ? Math.min(100, (value / maxValue) * 100) : 0
+  const hasSplit = rangedValue !== undefined && meleeValue !== undefined
+  const rangedWidth = maxValue > 0 && rangedValue !== undefined ? Math.min(100, (rangedValue / maxValue) * 100) : 0
+  const meleeWidth = maxValue > 0 && meleeValue !== undefined ? Math.min(100, (meleeValue / maxValue) * 100) : 0
+
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-3 text-sm">
+        <span className="font-semibold" style={{ color: 'var(--color-text)' }}>{label}</span>
+        <span className="app-muted">{valueLabel}</span>
+      </div>
+      <div className="mt-1 h-2 overflow-hidden rounded" style={{ background: 'var(--color-bg-soft)' }}>
+        {hasSplit ? (
+          <div className="flex h-full">
+            <div
+              className="h-full"
+              title={`Ranged ${rangedValue.toFixed(2)}`}
+              style={{
+                background: 'var(--color-accent)',
+                width: `${rangedWidth}%`,
+              }}
+            />
+            <div
+              className="h-full"
+              title={`Melee ${meleeValue.toFixed(2)}`}
+              style={{
+                background: 'var(--color-warning)',
+                width: `${meleeWidth}%`,
+              }}
+            />
+          </div>
+        ) : (
+          <div
+            className="h-full"
+            style={{
+              background: accent,
+              width: `${width}%`,
+            }}
+          />
+        )}
+      </div>
+      {hasSplit ? (
+        <div className="app-muted mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs">
+          <span>Ranged {rangedValue.toFixed(2)}</span>
+          <span>Melee {meleeValue.toFixed(2)}</span>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function ListHealthWeb({ metrics }: { metrics: ListHealthMetric[] }) {
+  const center = 120
+  const radius = 82
+  const webPoints = metrics.map((metric, index) =>
+    radarPoint(index, metrics.length, center, radius * (metric.score / 100)),
+  )
+  const polygonPoints = webPoints.map((point) => `${point.x},${point.y}`).join(' ')
+  const averageScore = Math.round(metrics.reduce((sum, metric) => sum + metric.score, 0) / Math.max(1, metrics.length))
+
+  return (
+    <section className="app-card overflow-hidden">
+      <div className="grid gap-5 lg:grid-cols-[280px_minmax(0,1fr)] lg:items-center">
+        <div className="relative mx-auto w-full max-w-[280px]">
+          <svg
+            aria-label="Balanced list web graph"
+            className="h-auto w-full"
+            role="img"
+            viewBox="0 0 240 240"
+          >
+            {[0.25, 0.5, 0.75, 1].map((scale) => (
+              <polygon
+                fill="none"
+                key={scale}
+                points={metrics
+                  .map((_, index) => radarPoint(index, metrics.length, center, radius * scale))
+                  .map((point) => `${point.x},${point.y}`)
+                  .join(' ')}
+                stroke="var(--color-border)"
+                strokeWidth="1"
+              />
+            ))}
+            {metrics.map((_, index) => {
+              const outerPoint = radarPoint(index, metrics.length, center, radius)
+              return (
+                <line
+                  key={index}
+                  stroke="var(--color-border)"
+                  strokeWidth="1"
+                  x1={center}
+                  x2={outerPoint.x}
+                  y1={center}
+                  y2={outerPoint.y}
+                />
+              )
+            })}
+            {metrics.map((metric, index) => {
+              const labelPoint = radarPoint(index, metrics.length, center, radius + 24)
+              return (
+                <text
+                  dominantBaseline="middle"
+                  fill="var(--color-text-muted)"
+                  fontSize="10"
+                  fontWeight="700"
+                  key={`${metric.id}-label`}
+                  textAnchor="middle"
+                  x={labelPoint.x}
+                  y={labelPoint.y}
+                >
+                  {graphAxisLabel(metric)}
+                </text>
+              )
+            })}
+            <polygon
+              fill="var(--color-accent)"
+              fillOpacity="0.22"
+              points={polygonPoints}
+              stroke="var(--color-accent)"
+              strokeLinejoin="round"
+              strokeWidth="3"
+            />
+            {webPoints.map((point, index) => (
+              <circle
+                cx={point.x}
+                cy={point.y}
+                fill="var(--color-surface-raised)"
+                key={metrics[index].id}
+                r="4"
+                stroke="var(--color-accent)"
+                strokeWidth="2"
+              />
+            ))}
+            <circle cx={center} cy={center} fill="var(--color-surface-raised)" r="29" stroke="var(--color-border)" />
+            <text
+              dominantBaseline="middle"
+              fill="var(--color-text)"
+              fontSize="24"
+              fontWeight="700"
+              textAnchor="middle"
+              x={center}
+              y={center - 5}
+            >
+              {averageScore}
+            </text>
+            <text
+              dominantBaseline="middle"
+              fill="var(--color-text-subtle)"
+              fontSize="10"
+              fontWeight="700"
+              textAnchor="middle"
+              x={center}
+              y={center + 16}
+            >
+              PROFILE
+            </text>
+          </svg>
+        </div>
+        <div>
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h3 className="text-lg font-semibold" style={{ color: 'var(--color-text)' }}>
+                Balanced list profile
+              </h3>
+              <p className="app-muted mt-1 text-sm">
+                Balanced list profile derived from current analysis.
+              </p>
+            </div>
+            <p className="rounded border px-3 py-2 text-sm font-semibold" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-muted)' }}>
+              {averageScore} overall
+            </p>
+          </div>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            {metrics.map((metric) => (
+              <div className="rounded border p-3" key={metric.id} style={{ borderColor: 'var(--color-border)' }}>
+                <div className="flex items-center justify-between gap-3">
+                  <p className="font-semibold" style={{ color: 'var(--color-text)' }}>{metric.label}</p>
+                  <span className="text-sm font-bold" style={{ color: statusColor(metric.status) }}>
+                    {metric.score}
+                  </span>
+                </div>
+                <p className="mt-1 text-xs font-semibold uppercase" style={{ color: statusColor(metric.status) }}>
+                  {metric.status}
+                </p>
+                <p className="app-muted mt-2 text-sm">{metric.summary}</p>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
     </section>
   )
@@ -779,6 +1059,14 @@ function sortedAnalysisUnits(units: ListAnalysisUnit[], sort: AnalysisSort) {
     if (sort.kind === 'unit') {
       return direction * left.unit_name.localeCompare(right.unit_name)
     }
+    if (sort.kind === 'toughness') {
+      const leftValue = left.effective_wounds
+      const rightValue = right.effective_wounds
+      if (leftValue === rightValue) {
+        return left.unit_name.localeCompare(right.unit_name)
+      }
+      return direction * (leftValue - rightValue)
+    }
     if (sort.kind === 'durability') {
       const leftValue = left.effective_wounds_per_100_points
       const rightValue = right.effective_wounds_per_100_points
@@ -806,7 +1094,14 @@ function sameSortColumn(left: AnalysisSort, right: AnalysisSort) {
   if (left.kind !== right.kind) {
     return false
   }
-  if (left.kind === 'unit' || left.kind === 'durability' || right.kind === 'unit' || right.kind === 'durability') {
+  if (
+    left.kind === 'unit' ||
+    left.kind === 'toughness' ||
+    left.kind === 'durability' ||
+    right.kind === 'unit' ||
+    right.kind === 'toughness' ||
+    right.kind === 'durability'
+  ) {
     return true
   }
   return isTargetSort(left) && isTargetSort(right) && left.targetId === right.targetId
@@ -814,6 +1109,163 @@ function sameSortColumn(left: AnalysisSort, right: AnalysisSort) {
 
 function isTargetSort(sort: AnalysisSort): sort is Extract<AnalysisSort, { targetId: string }> {
   return sort.kind === 'ev' || sort.kind === 'efficiency'
+}
+
+function buildListHealthMetrics(
+  armyList: ArmyList,
+  units: Unit[],
+  analysis: ListAnalysisResult,
+): ListHealthMetric[] {
+  const unitLookup = new Map(units.map((unit) => [unit.id, unit]))
+  const effectiveEntries = armyList.units.filter((entry) => entry.parent_entry === null)
+  const activationTarget = armyList.point_limit >= 1500 ? 7 : 5
+  const mobileEntries = effectiveEntries.filter((entry) => entryHasAnyRule(entry, unitLookup, MOBILITY_RULES))
+  const averageWoundsPer100 = average(analysis.totals.map((total) => total.wounds_per_100_points))
+  const averageDurability = average(analysis.units.map((unit) => unit.effective_wounds_per_100_points))
+  const weakestTarget = [...analysis.totals].sort((left, right) => left.wounds_per_100_points - right.wounds_per_100_points)[0]
+  const weakestTargetName = analysis.targets.find((target) => target.id === weakestTarget?.target_id)?.name ?? 'No target'
+  const totalRanged = analysis.totals.reduce((sum, total) => sum + total.ranged_ev, 0)
+  const totalMelee = analysis.totals.reduce((sum, total) => sum + total.melee_ev, 0)
+  const totalDamage = totalRanged + totalMelee
+  const rangedShare = totalDamage > 0 ? totalRanged / totalDamage : 0
+  const meleeShare = totalDamage > 0 ? totalMelee / totalDamage : 0
+  const battlelineScore = totalDamage > 0 ? clampScore((Math.min(rangedShare, meleeShare) / 0.35) * 100) : 0
+
+  return [
+    metric(
+      'activation-health',
+      'Activation Health',
+      clampScore((effectiveEntries.length / activationTarget) * 100),
+      `${effectiveEntries.length} effective activations / target ${activationTarget}`,
+    ),
+    metric(
+      'objective-reach',
+      'Objective Reach',
+      effectiveEntries.length > 0 ? clampScore((mobileEntries.length / effectiveEntries.length) * 100) : 0,
+      `${mobileEntries.length} of ${effectiveEntries.length} effective units show reach rules`,
+    ),
+    metric(
+      'damage-pressure',
+      'Damage Pressure',
+      clampScore((averageWoundsPer100 / 0.75) * 100),
+      `${averageWoundsPer100.toFixed(2)} avg wounds / 100 pts`,
+    ),
+    metric(
+      'durability',
+      'Durability',
+      clampScore((averageDurability / 12) * 100),
+      `${averageDurability.toFixed(2)} avg effective wounds / 100 pts`,
+    ),
+    metric(
+      'threat-coverage',
+      'Threat Coverage',
+      clampScore(((weakestTarget?.wounds_per_100_points ?? 0) / 0.6) * 100),
+      `${weakestTargetName} is the lowest lane at ${(weakestTarget?.wounds_per_100_points ?? 0).toFixed(2)} wounds / 100 pts`,
+    ),
+    metric(
+      'battleline-balance',
+      'Battleline Balance',
+      battlelineScore,
+      `${Math.round(rangedShare * 100)}% ranged / ${Math.round(meleeShare * 100)}% melee`,
+    ),
+  ]
+}
+
+const MOBILITY_RULES = new Set(['aircraft', 'ambush', 'fast', 'flying', 'scout', 'strider', 'transport'])
+
+function metric(id: string, label: string, score: number, summary: string): ListHealthMetric {
+  return {
+    id,
+    label,
+    score,
+    status: metricStatus(score),
+    summary,
+  }
+}
+
+function graphAxisLabel(metric: ListHealthMetric) {
+  const labels: Record<string, string> = {
+    'activation-health': 'Activation',
+    'objective-reach': 'Reach',
+    'damage-pressure': 'Damage',
+    durability: 'Durability',
+    'threat-coverage': 'Coverage',
+    'battleline-balance': 'Balance',
+  }
+  return labels[metric.id] ?? metric.label
+}
+
+function metricStatus(score: number): ListHealthMetric['status'] {
+  if (score >= 75) {
+    return 'Strong'
+  }
+  if (score >= 45) {
+    return 'Watch'
+  }
+  return 'Gap'
+}
+
+function statusColor(status: ListHealthMetric['status']) {
+  if (status === 'Strong') {
+    return 'var(--color-success)'
+  }
+  if (status === 'Watch') {
+    return 'var(--color-warning)'
+  }
+  return 'var(--color-danger)'
+}
+
+function entryHasAnyRule(entry: ListUnit, unitLookup: Map<number, Unit>, rules: Set<string>) {
+  const unit = unitLookup.get(entry.unit)
+  if (!unit) {
+    return false
+  }
+  return rulesForEntry(entry, unit).some((rule) => rules.has(rule))
+}
+
+function rulesForEntry(entry: ListUnit, unit: Unit) {
+  const rules = new Set(Object.keys(unit.special_rules).map(normalizeRule))
+  for (const section of unit.upgrade_sections) {
+    for (const option of section.options) {
+      if (!entry.selected_upgrades.includes(option.id)) {
+        continue
+      }
+      for (const gainedRule of option.gains) {
+        Object.keys(gainedRule).forEach((rule) => rules.add(normalizeRule(rule)))
+      }
+    }
+  }
+  return [...rules]
+}
+
+function normalizeRule(rule: string) {
+  return rule.trim().toLowerCase()
+}
+
+function average(values: number[]) {
+  if (values.length === 0) {
+    return 0
+  }
+  return values.reduce((sum, value) => sum + value, 0) / values.length
+}
+
+function clampScore(value: number) {
+  if (!Number.isFinite(value)) {
+    return 0
+  }
+  return Math.max(0, Math.min(100, Math.round(value)))
+}
+
+function radarPoint(index: number, total: number, center: number, radius: number) {
+  const angle = -Math.PI / 2 + (index * 2 * Math.PI) / total
+  return {
+    x: roundSvgPoint(center + Math.cos(angle) * radius),
+    y: roundSvgPoint(center + Math.sin(angle) * radius),
+  }
+}
+
+function roundSvgPoint(value: number) {
+  return Math.round(value * 100) / 100
 }
 
 function BestUnitCard({ analysis, target }: { analysis: ListAnalysisResult; target: TargetProfile }) {
@@ -841,7 +1293,11 @@ function resultFor(unit: ListAnalysisUnit, targetId: string) {
     unit.target_results.find((result) => result.target_id === targetId) ?? {
       target_id: targetId,
       ev: 0,
+      ranged_ev: 0,
+      melee_ev: 0,
       wounds_per_100_points: 0,
+      ranged_wounds_per_100_points: 0,
+      melee_wounds_per_100_points: 0,
       p_kill_model: 0,
     }
   )

@@ -1,6 +1,6 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { Link, MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { apiClient } from '../api/client'
@@ -224,6 +224,21 @@ const listWithBull: ArmyList = {
   ],
 }
 
+const secondList: ArmyList = {
+  ...emptyList,
+  id: 2,
+  name: 'Second Draft',
+  units: [],
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((nextResolve) => {
+    resolve = nextResolve
+  })
+  return { promise, resolve }
+}
+
 describe('ListBuilderPage', () => {
   beforeEach(() => {
     vi.stubGlobal('location', {
@@ -277,6 +292,36 @@ describe('ListBuilderPage', () => {
       expect(apiClient.removeListUnit).toHaveBeenCalledWith(1, 100)
     })
     expect(await screen.findByText('0 / 2,000 pts')).toBeInTheDocument()
+  })
+
+  it('clears stale army list content while navigating between list routes', async () => {
+    const user = userEvent.setup()
+    const nextList = deferred<ArmyList>()
+    vi.mocked(apiClient.getList).mockImplementation((listId) =>
+      listId === 1 ? Promise.resolve(listWithPaladins) : nextList.promise,
+    )
+    vi.mocked(apiClient.getFactionUnits).mockResolvedValue([paladins])
+
+    render(
+      <MemoryRouter initialEntries={['/lists/1']}>
+        <Link to="/lists/2">Open second list</Link>
+        <Routes>
+          <Route path="/lists/:id" element={<ListBuilderPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByRole('heading', { name: 'Tournament 2000' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('link', { name: /open second list/i }))
+
+    expect(screen.getByText('Loading army list...')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Tournament 2000' })).not.toBeInTheDocument()
+
+    nextList.resolve(secondList)
+
+    expect(await screen.findByRole('heading', { name: 'Second Draft' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Tournament 2000' })).not.toBeInTheDocument()
   })
 
   it('updates selected weapon upgrades from the list row', async () => {
@@ -374,20 +419,72 @@ describe('ListBuilderPage', () => {
           unit_name: 'Paladins',
           model_count: 1,
           points: 180,
+          effective_wounds: 18,
           effective_wounds_per_100_points: 10,
           weapon_id: 30,
           weapon_name: 'Great Weapon',
           target_results: [
-            { target_id: 'infantry', ev: 1.25, wounds_per_100_points: 0.69, p_kill_model: 0.8 },
-            { target_id: 'elite', ev: 0.75, wounds_per_100_points: 0.42, p_kill_model: 0.3 },
-            { target_id: 'monster', ev: 0.5, wounds_per_100_points: 0.28, p_kill_model: 0.1 },
+            {
+              target_id: 'infantry',
+              ev: 1.25,
+              ranged_ev: 0,
+              melee_ev: 1.25,
+              wounds_per_100_points: 0.69,
+              ranged_wounds_per_100_points: 0,
+              melee_wounds_per_100_points: 0.69,
+              p_kill_model: 0.8,
+            },
+            {
+              target_id: 'elite',
+              ev: 0.75,
+              ranged_ev: 0,
+              melee_ev: 0.75,
+              wounds_per_100_points: 0.42,
+              ranged_wounds_per_100_points: 0,
+              melee_wounds_per_100_points: 0.42,
+              p_kill_model: 0.3,
+            },
+            {
+              target_id: 'monster',
+              ev: 0.5,
+              ranged_ev: 0,
+              melee_ev: 0.5,
+              wounds_per_100_points: 0.28,
+              ranged_wounds_per_100_points: 0,
+              melee_wounds_per_100_points: 0.28,
+              p_kill_model: 0.1,
+            },
           ],
         },
       ],
       totals: [
-        { target_id: 'infantry', ev: 1.25, wounds_per_100_points: 0.69 },
-        { target_id: 'elite', ev: 0.75, wounds_per_100_points: 0.42 },
-        { target_id: 'monster', ev: 0.5, wounds_per_100_points: 0.28 },
+        {
+          target_id: 'infantry',
+          ev: 1.25,
+          ranged_ev: 0,
+          melee_ev: 1.25,
+          wounds_per_100_points: 0.69,
+          ranged_wounds_per_100_points: 0,
+          melee_wounds_per_100_points: 0.69,
+        },
+        {
+          target_id: 'elite',
+          ev: 0.75,
+          ranged_ev: 0,
+          melee_ev: 0.75,
+          wounds_per_100_points: 0.42,
+          ranged_wounds_per_100_points: 0,
+          melee_wounds_per_100_points: 0.42,
+        },
+        {
+          target_id: 'monster',
+          ev: 0.5,
+          ranged_ev: 0,
+          melee_ev: 0.5,
+          wounds_per_100_points: 0.28,
+          ranged_wounds_per_100_points: 0,
+          melee_wounds_per_100_points: 0.28,
+        },
       ],
     })
     vi.mocked(apiClient.exportArmyForgeList).mockResolvedValue({
@@ -453,9 +550,29 @@ describe('ListBuilderPage', () => {
     expect(apiClient.analyzeList).toHaveBeenCalledWith(1, expect.arrayContaining([
       expect.objectContaining({ id: 'infantry' }),
     ]))
-    expect(screen.getAllByText('1.25 EV').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('1.25 total EV').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Ranged 0.00 / Melee 1.25').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('18.00 toughness').length).toBeGreaterThan(0)
     expect(screen.getAllByText('0.69 wounds / 100 pts').length).toBeGreaterThan(0)
-    expect(screen.getByRole('button', { name: /effective wounds \/ 100 pts/i })).toBeInTheDocument()
+    const graph = screen.getByRole('img', { name: /balanced list web graph/i })
+    expect(graph).toBeInTheDocument()
+    expect(within(graph).getByText('Activation')).toBeInTheDocument()
+    expect(within(graph).getByText('Reach')).toBeInTheDocument()
+    expect(within(graph).getByText('Damage')).toBeInTheDocument()
+    expect(within(graph).getByText('Durability')).toBeInTheDocument()
+    expect(within(graph).getByText('Coverage')).toBeInTheDocument()
+    expect(within(graph).getByText('Balance')).toBeInTheDocument()
+    expect(screen.getByText('Balanced list profile')).toBeInTheDocument()
+    expect(screen.getByText('Activation Health')).toBeInTheDocument()
+    expect(screen.getByText('Objective Reach')).toBeInTheDocument()
+    expect(screen.getByText('Damage Pressure')).toBeInTheDocument()
+    expect(screen.getAllByText('Durability').length).toBeGreaterThan(0)
+    expect(screen.getByText('Threat Coverage')).toBeInTheDocument()
+    expect(screen.getByText('Battleline Balance')).toBeInTheDocument()
+    expect(screen.getByText(/1 effective activations \/ target 7/i)).toBeInTheDocument()
+    expect(screen.getByText(/0% ranged \/ 100% melee/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^toughness$/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /toughness \/ 100 pts/i })).toBeInTheDocument()
     expect(screen.getByText('10.00')).toBeInTheDocument()
     expect(screen.getByText(/best vs infantry/i)).toBeInTheDocument()
 
@@ -484,13 +601,41 @@ describe('ListBuilderPage', () => {
           unit_name: 'Paladins',
           model_count: 1,
           points: 180,
+          effective_wounds: 18,
           effective_wounds_per_100_points: 10,
           weapon_id: 30,
           weapon_name: 'Great Weapon',
           target_results: [
-            { target_id: 'infantry', ev: 1.25, wounds_per_100_points: 0.69, p_kill_model: 0.8 },
-            { target_id: 'elite', ev: 0.75, wounds_per_100_points: 0.42, p_kill_model: 0.3 },
-            { target_id: 'monster', ev: 0.5, wounds_per_100_points: 0.28, p_kill_model: 0.1 },
+            {
+              target_id: 'infantry',
+              ev: 1.25,
+              ranged_ev: 0,
+              melee_ev: 1.25,
+              wounds_per_100_points: 0.69,
+              ranged_wounds_per_100_points: 0,
+              melee_wounds_per_100_points: 0.69,
+              p_kill_model: 0.8,
+            },
+            {
+              target_id: 'elite',
+              ev: 0.75,
+              ranged_ev: 0,
+              melee_ev: 0.75,
+              wounds_per_100_points: 0.42,
+              ranged_wounds_per_100_points: 0,
+              melee_wounds_per_100_points: 0.42,
+              p_kill_model: 0.3,
+            },
+            {
+              target_id: 'monster',
+              ev: 0.5,
+              ranged_ev: 0,
+              melee_ev: 0.5,
+              wounds_per_100_points: 0.28,
+              ranged_wounds_per_100_points: 0,
+              melee_wounds_per_100_points: 0.28,
+              p_kill_model: 0.1,
+            },
           ],
         },
         {
@@ -499,20 +644,72 @@ describe('ListBuilderPage', () => {
           unit_name: 'Archers',
           model_count: 1,
           points: 90,
+          effective_wounds: 12,
           effective_wounds_per_100_points: 13.33,
           weapon_id: 32,
           weapon_name: 'Longbow',
           target_results: [
-            { target_id: 'infantry', ev: 0.5, wounds_per_100_points: 0.56, p_kill_model: 0.4 },
-            { target_id: 'elite', ev: 0.5, wounds_per_100_points: 0.8, p_kill_model: 0.2 },
-            { target_id: 'monster', ev: 0.1, wounds_per_100_points: 0.11, p_kill_model: 0.01 },
+            {
+              target_id: 'infantry',
+              ev: 0.5,
+              ranged_ev: 0.5,
+              melee_ev: 0,
+              wounds_per_100_points: 0.56,
+              ranged_wounds_per_100_points: 0.56,
+              melee_wounds_per_100_points: 0,
+              p_kill_model: 0.4,
+            },
+            {
+              target_id: 'elite',
+              ev: 0.5,
+              ranged_ev: 0.5,
+              melee_ev: 0,
+              wounds_per_100_points: 0.8,
+              ranged_wounds_per_100_points: 0.8,
+              melee_wounds_per_100_points: 0,
+              p_kill_model: 0.2,
+            },
+            {
+              target_id: 'monster',
+              ev: 0.1,
+              ranged_ev: 0.1,
+              melee_ev: 0,
+              wounds_per_100_points: 0.11,
+              ranged_wounds_per_100_points: 0.11,
+              melee_wounds_per_100_points: 0,
+              p_kill_model: 0.01,
+            },
           ],
         },
       ],
       totals: [
-        { target_id: 'infantry', ev: 1.75, wounds_per_100_points: 0.65 },
-        { target_id: 'elite', ev: 1.25, wounds_per_100_points: 0.46 },
-        { target_id: 'monster', ev: 0.6, wounds_per_100_points: 0.22 },
+        {
+          target_id: 'infantry',
+          ev: 1.75,
+          ranged_ev: 0.5,
+          melee_ev: 1.25,
+          wounds_per_100_points: 0.65,
+          ranged_wounds_per_100_points: 0.19,
+          melee_wounds_per_100_points: 0.46,
+        },
+        {
+          target_id: 'elite',
+          ev: 1.25,
+          ranged_ev: 0.5,
+          melee_ev: 0.75,
+          wounds_per_100_points: 0.46,
+          ranged_wounds_per_100_points: 0.19,
+          melee_wounds_per_100_points: 0.28,
+        },
+        {
+          target_id: 'monster',
+          ev: 0.6,
+          ranged_ev: 0.1,
+          melee_ev: 0.5,
+          wounds_per_100_points: 0.22,
+          ranged_wounds_per_100_points: 0.04,
+          melee_wounds_per_100_points: 0.19,
+        },
       ],
     })
 
@@ -533,6 +730,9 @@ describe('ListBuilderPage', () => {
 
     await user.click(screen.getByRole('button', { name: /elite wounds \/ 100 pts/i }))
     expect(tableUnitNames()).toEqual(['Archers', 'Paladins'])
+
+    await user.click(screen.getByRole('button', { name: /^toughness$/i }))
+    expect(tableUnitNames()).toEqual(['Paladins', 'Archers'])
   })
 })
 

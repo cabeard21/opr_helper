@@ -5,7 +5,7 @@ from typing import Any
 
 from army_books.calc.engine import calculate_distribution, calculate_ev
 from army_books.models import Unit, UnitWeaponSlot
-from lists.analysis import DEFAULT_TARGETS, TargetProfile
+from lists.analysis import DEFAULT_TARGETS, TargetProfile, defensive_wound_multiplier, weapon_combat_context
 from lists.validation import unit_selection_points
 
 
@@ -86,7 +86,10 @@ def _score_unit(unit: Unit, targets: list[TargetProfile]) -> UnitProfile:
         wounds_per_100pts_infantry=infantry_score["wounds_per_100_points"],
         p_kill_infantry=infantry_score["p_kill_model"],
         effective_health=effective_health,
-        resilience_score=round(effective_health / resilience_denominator, 6)
+        resilience_score=round(
+            (effective_health / resilience_denominator) * defensive_wound_multiplier(unit.special_rules),
+            6,
+        )
         if resilience_denominator > 0
         else 0,
         has_scout=_has_rule(unit.special_rules, "Scout"),
@@ -127,13 +130,22 @@ def _target_score(
         weapon = slot.weapon
         attacks = weapon.attacks * unit.default_models
         special_rules = {**unit.special_rules, **weapon.special_rules}
-        ev += calculate_ev(attacks, unit.quality, target.defense, weapon.ap, special_rules)
+        combat_context = weapon_combat_context(weapon, unit.default_models)
+        ev += calculate_ev(
+            attacks,
+            unit.quality,
+            target.defense,
+            weapon.ap,
+            special_rules,
+            combat_context=combat_context,
+        )
         distribution = calculate_distribution(
             attacks,
             unit.quality,
             target.defense,
             weapon.ap,
             special_rules,
+            combat_context=combat_context,
         )
         p_kill_model += sum(
             point["probability"]

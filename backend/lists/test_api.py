@@ -807,14 +807,47 @@ class ListsApiTests(TestCase):
         self.assertEqual(unit_result["unit_name"], "Paladins")
         self.assertEqual(unit_result["model_count"], 2)
         self.assertEqual(unit_result["points"], 360)
+        self.assertEqual(unit_result["effective_wounds"], 12.0)
         self.assertEqual(unit_result["effective_wounds_per_100_points"], 3.333333)
         self.assertEqual(unit_result["weapon_name"], "Great Weapon")
         infantry_result = unit_result["target_results"][0]
         self.assertEqual(infantry_result["target_id"], "infantry")
         self.assertEqual(infantry_result["ev"], 2.666667)
+        self.assertEqual(infantry_result["ranged_ev"], 0)
+        self.assertEqual(infantry_result["melee_ev"], 2.666667)
         self.assertEqual(infantry_result["wounds_per_100_points"], 0.740741)
+        self.assertEqual(infantry_result["ranged_wounds_per_100_points"], 0)
+        self.assertEqual(infantry_result["melee_wounds_per_100_points"], 0.740741)
         self.assertGreater(infantry_result["p_kill_model"], 0)
         self.assertEqual(payload["data"]["totals"][0]["ev"], 2.666667)
+        self.assertEqual(payload["data"]["totals"][0]["ranged_ev"], 0)
+        self.assertEqual(payload["data"]["totals"][0]["melee_ev"], 2.666667)
+
+    def test_analyze_list_counts_regeneration_as_extra_effective_wounds(self):
+        self.unit.special_rules = {"Regeneration": True}
+        self.unit.save()
+        army_list = ArmyList.objects.create(
+            name="Tournament 2000",
+            faction=self.faction,
+            point_limit=2000,
+        )
+        ListUnit.objects.create(
+            army_list=army_list,
+            unit=self.unit,
+            model_count=2,
+            selected_weapon_slot=self.slot,
+        )
+
+        response = self.client.post(
+            f"/api/lists/{army_list.id}/analysis/",
+            {"targets": [{"id": "infantry", "name": "Infantry", "defense": 5, "tough": 1}]},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        unit_result = response.json()["data"]["units"][0]
+        self.assertEqual(unit_result["effective_wounds"], 18.0)
+        self.assertEqual(unit_result["effective_wounds_per_100_points"], 5.0)
 
     def test_analyze_list_uses_upgrade_cost_for_efficiency(self):
         army_list = ArmyList.objects.create(
@@ -889,7 +922,72 @@ class ListsApiTests(TestCase):
         self.assertEqual(unit_result["points"], 270)
         self.assertEqual(unit_result["weapon_name"], "Stomp + Twin Arm-Flamethrowers")
         self.assertEqual(unit_result["weapon_names"], ["Stomp", "Twin Arm-Flamethrowers"])
-        self.assertGreater(unit_result["target_results"][0]["ev"], 0)
+        target_result = unit_result["target_results"][0]
+        self.assertEqual(target_result["ev"], 1.5)
+        self.assertEqual(target_result["ranged_ev"], 1.0)
+        self.assertEqual(target_result["melee_ev"], 0.5)
+        self.assertEqual(
+            target_result["ev"],
+            round(target_result["ranged_ev"] + target_result["melee_ev"], 6),
+        )
+        self.assertEqual(target_result["ranged_wounds_per_100_points"], round((1.0 / 270) * 100, 6))
+        self.assertEqual(target_result["melee_wounds_per_100_points"], round((0.5 / 270) * 100, 6))
+        self.assertEqual(response.json()["data"]["totals"][0]["ranged_ev"], 1.0)
+        self.assertEqual(response.json()["data"]["totals"][0]["melee_ev"], 0.5)
+
+    def test_analyze_list_uses_charge_context_for_melee_only(self):
+        melee_weapon = Weapon.objects.create(
+            name="Furious Claws",
+            range=0,
+            attacks=6,
+            attacks_string="A6",
+            ap=0,
+            special_rules={"Furious": True},
+        )
+        ranged_weapon = Weapon.objects.create(
+            name="Furious Bow",
+            range=18,
+            attacks=6,
+            attacks_string="A6",
+            ap=0,
+            special_rules={"Furious": True},
+        )
+        melee_unit = Unit.objects.create(
+            faction=self.faction,
+            name="Charging Claws",
+            quality=3,
+            defense=5,
+            tough=1,
+            points=100,
+        )
+        ranged_unit = Unit.objects.create(
+            faction=self.faction,
+            name="Furious Archers",
+            quality=3,
+            defense=5,
+            tough=1,
+            points=100,
+        )
+        melee_slot = UnitWeaponSlot.objects.create(unit=melee_unit, weapon=melee_weapon, is_default=True)
+        ranged_slot = UnitWeaponSlot.objects.create(unit=ranged_unit, weapon=ranged_weapon, is_default=True)
+        army_list = ArmyList.objects.create(
+            name="Tournament 2000",
+            faction=self.faction,
+            point_limit=2000,
+        )
+        ListUnit.objects.create(army_list=army_list, unit=melee_unit, model_count=1, selected_weapon_slot=melee_slot)
+        ListUnit.objects.create(army_list=army_list, unit=ranged_unit, model_count=1, selected_weapon_slot=ranged_slot)
+
+        response = self.client.post(
+            f"/api/lists/{army_list.id}/analysis/",
+            {"targets": [{"id": "infantry", "name": "Infantry", "defense": 4, "tough": 1}]},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        results = {unit["unit_name"]: unit["target_results"][0] for unit in response.json()["data"]["units"]}
+        self.assertEqual(results["Charging Claws"]["ev"], 2.5)
+        self.assertEqual(results["Furious Archers"]["ev"], 2.0)
 
     def test_analyze_missing_list_returns_error_envelope(self):
         response = self.client.post(

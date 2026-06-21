@@ -75,7 +75,7 @@ class UnitScorerTests(TestCase):
         profile = score_faction_units(self.faction.id)[0]
 
         self.assertEqual(profile.effective_health, 3)
-        self.assertEqual(profile.resilience_score, 1.0)
+        self.assertEqual(profile.resilience_score, 1.5)
         self.assertTrue(profile.has_scout)
         self.assertTrue(profile.has_fast)
         self.assertTrue(profile.has_flying)
@@ -96,3 +96,58 @@ class UnitScorerTests(TestCase):
         profiles = score_faction_units(self.faction.id)
 
         self.assertEqual({profile.name for profile in profiles}, {"Guardians", "Paladins"})
+
+    def test_scores_charge_context_for_melee_default_weapons_only(self):
+        melee_weapon = Weapon.objects.create(
+            name="Furious Claws",
+            range=0,
+            attacks=6,
+            attacks_string="A6",
+            ap=0,
+            special_rules={"Furious": True},
+        )
+        ranged_weapon = Weapon.objects.create(
+            name="Furious Bow",
+            range=18,
+            attacks=6,
+            attacks_string="A6",
+            ap=0,
+            special_rules={"Furious": True},
+        )
+        melee_unit = Unit.objects.create(
+            faction=self.faction,
+            name="Furious Infantry",
+            quality=4,
+            defense=5,
+            tough=1,
+            points=100,
+            default_models=1,
+        )
+        ranged_unit = Unit.objects.create(
+            faction=self.faction,
+            name="Furious Archers",
+            quality=4,
+            defense=5,
+            tough=1,
+            points=100,
+            default_models=1,
+        )
+        UnitWeaponSlot.objects.create(unit=melee_unit, weapon=melee_weapon, is_default=True)
+        UnitWeaponSlot.objects.create(unit=ranged_unit, weapon=ranged_weapon, is_default=True)
+
+        profiles = {profile.name: profile for profile in score_faction_units(self.faction.id)}
+
+        self.assertEqual(profiles["Furious Infantry"].ev_infantry, 2.666667)
+        self.assertEqual(profiles["Furious Archers"].ev_infantry, 2.0)
+
+    def test_scores_impact_and_thrust_with_melee_charge_context(self):
+        self.weapon.special_rules = {"Impact": 2, "Thrust": True}
+        self.weapon.ap = 0
+        self.weapon.save()
+        self.paladins.default_models = 3
+        self.paladins.quality = 4
+        self.paladins.save()
+
+        profile = next(profile for profile in score_faction_units(self.faction.id) if profile.unit_id == self.paladins.id)
+
+        self.assertEqual(profile.ev_infantry, 6.666667)

@@ -1,5 +1,0 @@
-- When using advisor preview, if the user clicks "Create list" the list created should use the units in the preview
-- Analysis page should show wounds / 100 pts for the units in the table also
-- Table in analysis page should be sortable
-- I don't think the advisor is repecting the force organization/army scale rules necessarily, for example, i got a list with more than the max units for a 750 pt army
-- Add the ability to delete army lists

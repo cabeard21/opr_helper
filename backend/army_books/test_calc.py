@@ -51,13 +51,167 @@ def test_poison_auto_wounds_on_natural_six():
 def test_rending_uses_ap_six_on_natural_six():
     ev = calculate_ev(6, 4, 2, 0, {"Rending": True})
 
-    # Per attack: natural 6 wounds against AP6, rolls 4-5 hit at normal AP.
-    assert ev == pytest.approx(6 * ((1 / 6) * 1 + (2 / 6) * (1 / 6)))
+    # Per attack: natural 6 gets AP(+4), rolls 4-5 hit at normal AP.
+    assert ev == pytest.approx(6 * ((1 / 6) * (5 / 6) + (2 / 6) * (1 / 6)))
 
 
-def test_blast_skips_hit_rolls_and_furious_adds_expected_attacks():
+def test_regeneration_target_ignores_one_third_of_wounds():
+    ev = calculate_ev(6, 4, 4, 0, {}, target_special_rules={"Regeneration": True})
+
+    assert ev == pytest.approx(6 * 0.5 * 0.5 * (2 / 3))
+
+    distribution = calculate_distribution(
+        1,
+        4,
+        4,
+        0,
+        {},
+        target_special_rules={"Regeneration": True},
+    )
+    assert distribution[1]["probability"] == pytest.approx(0.25 * (2 / 3), abs=1e-6)
+
+
+def test_regeneration_ignores_deadly_wound_before_multiplication():
+    distribution = calculate_distribution(
+        1,
+        4,
+        4,
+        0,
+        {"Deadly": 3},
+        target_special_rules={"Regeneration": True},
+    )
+
+    assert distribution[3]["probability"] == pytest.approx(0.25 * (2 / 3), abs=1e-6)
+    assert distribution[1]["probability"] == pytest.approx(0)
+    assert distribution[2]["probability"] == pytest.approx(0)
+
+
+def test_bane_ignores_target_regeneration():
+    ev = calculate_ev(
+        6,
+        4,
+        4,
+        0,
+        {"Bane": True},
+        target_special_rules={"Regeneration": True},
+    )
+
+    assert ev == pytest.approx(6 * 0.5 * 0.5)
+
+
+def test_rending_ignores_regeneration_on_all_hits_and_adds_ap_on_natural_six():
+    ev = calculate_ev(
+        6,
+        4,
+        2,
+        0,
+        {"Rending": True},
+        target_special_rules={"Regeneration": True},
+    )
+
+    expected_per_attack = (1 / 6) * (5 / 6) + ((2 / 6) * (1 / 6))
+    assert ev == pytest.approx(6 * expected_per_attack)
+
+
+def test_blast_skips_hit_rolls_and_furious_requires_charge():
     assert calculate_ev(3, 4, 4, 0, {"Blast": 2}) == pytest.approx(2 * 0.5)
-    assert calculate_ev(6, 4, 4, 0, {"Furious": True}) == pytest.approx(7 * 0.5 * 0.5)
+    assert calculate_ev(6, 4, 4, 0, {"Furious": True}) == pytest.approx(6 * 0.5 * 0.5)
+    assert calculate_ev(
+        6,
+        4,
+        4,
+        0,
+        {"Furious": True},
+        combat_context={"charging": True},
+    ) == pytest.approx(6 * ((2 / 6) * 0.5 + (1 / 6) * 2 * 0.5))
+
+
+def test_surge_and_sergeant_add_extra_hits_on_natural_sixes():
+    expected = 6 * ((2 / 6) * 0.5 + (1 / 6) * 2 * 0.5)
+
+    assert calculate_ev(6, 4, 4, 0, {"Surge": True}) == pytest.approx(expected)
+    assert calculate_ev(6, 4, 4, 0, {"Sergeant": True}) == pytest.approx(expected)
+
+
+def test_relentless_adds_extra_hits_when_shooting_over_nine_inches():
+    expected = 6 * ((2 / 6) * 0.5 + (1 / 6) * 2 * 0.5)
+
+    assert calculate_ev(6, 4, 4, 0, {"Relentless": True}) == pytest.approx(6 * 0.5 * 0.5)
+    assert calculate_ev(
+        6,
+        4,
+        4,
+        0,
+        {"Relentless": True},
+        combat_context={"target_over_9": True, "is_melee": False},
+    ) == pytest.approx(expected)
+    assert calculate_ev(
+        6,
+        4,
+        4,
+        0,
+        {"Relentless": True},
+        combat_context={"target_over_9": True, "is_melee": True},
+    ) == pytest.approx(6 * 0.5 * 0.5)
+
+
+def test_extra_hits_do_not_inherit_natural_six_rending_ap():
+    ev = calculate_ev(6, 4, 2, 0, {"Surge": True, "Rending": True})
+
+    expected_per_attack = (2 / 6) * (1 / 6) + (1 / 6) * ((5 / 6) + (1 / 6))
+    assert ev == pytest.approx(6 * expected_per_attack)
+
+
+def test_thrust_applies_only_on_charging_melee():
+    baseline = calculate_ev(6, 4, 4, 0, {"Thrust": True})
+    ranged_charge = calculate_ev(
+        6,
+        4,
+        4,
+        0,
+        {"Thrust": True},
+        combat_context={"charging": True, "is_melee": False},
+    )
+    melee_charge = calculate_ev(
+        6,
+        4,
+        4,
+        0,
+        {"Thrust": True},
+        combat_context={"charging": True, "is_melee": True},
+    )
+
+    assert baseline == pytest.approx(6 * 0.5 * 0.5)
+    assert ranged_charge == pytest.approx(baseline)
+    assert melee_charge == pytest.approx(6 * (4 / 6) * (4 / 6))
+
+
+def test_impact_adds_charge_hits_without_weapon_specials():
+    ev = calculate_ev(
+        0,
+        4,
+        4,
+        0,
+        {"Impact": 2, "Deadly": 3},
+        combat_context={"charging": True, "attacking_models": 3},
+    )
+
+    assert ev == pytest.approx(6 * (5 / 6) * 0.5)
+    assert calculate_ev(0, 4, 4, 0, {"Impact": 2}) == pytest.approx(0)
+
+
+def test_unstoppable_ignores_regeneration_and_negative_modifiers():
+    ev = calculate_ev(
+        6,
+        4,
+        4,
+        0,
+        {"Unstoppable": True},
+        modifiers={"stealth": True, "indirect": True},
+        target_special_rules={"Regeneration": True},
+    )
+
+    assert ev == pytest.approx(6 * 0.5 * 0.5)
 
 
 def test_stealth_and_indirect_apply_hit_penalties():

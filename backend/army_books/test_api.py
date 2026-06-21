@@ -75,6 +75,45 @@ class ArmyBooksApiTests(TestCase):
         self.assertIn({"wounds": 0, "probability": 0.197531}, payload["data"]["distribution"])
         self.assertGreater(payload["data"]["p_kill_model"], 0)
 
+    def test_calc_endpoint_applies_target_regeneration(self):
+        response = self.client.post(
+            "/api/calc/ev/",
+            {
+                "unit_id": self.unit.id,
+                "weapon_id": self.weapon.id,
+                "target": {
+                    "defense": 4,
+                    "tough": 3,
+                    "special_rules": {"Regeneration": True},
+                },
+            },
+            format="json",
+        )
+
+        payload = response.json()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["data"]["ev"], 2.222222)
+
+    def test_calc_endpoint_accepts_combat_context(self):
+        self.weapon.special_rules = {"Impact": 2, "Thrust": True}
+        self.weapon.ap = 0
+        self.weapon.save()
+
+        response = self.client.post(
+            "/api/calc/ev/",
+            {
+                "unit_id": self.unit.id,
+                "weapon_id": self.weapon.id,
+                "target": {"defense": 4, "tough": 3},
+                "combat_context": {"charging": True},
+            },
+            format="json",
+        )
+
+        payload = response.json()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["data"]["ev"], 1.944444)
+
     def test_calc_endpoint_validates_missing_records(self):
         response = self.client.post(
             "/api/calc/ev/",

@@ -228,6 +228,10 @@ export type CalcInput = {
     stealth?: boolean
     indirect?: boolean
   }
+  combat_context?: {
+    charging?: boolean
+    target_over_9?: boolean
+  }
 }
 
 export type DistributionPoint = {
@@ -253,7 +257,11 @@ export type TargetProfile = {
 export type UnitTargetResult = {
   target_id: string
   ev: number
+  ranged_ev: number
+  melee_ev: number
   wounds_per_100_points: number
+  ranged_wounds_per_100_points: number
+  melee_wounds_per_100_points: number
   p_kill_model: number
 }
 
@@ -263,6 +271,7 @@ export type ListAnalysisUnit = {
   unit_name: string
   model_count: number
   points: number
+  effective_wounds: number
   effective_wounds_per_100_points: number
   weapon_id: number
   weapon_name: string
@@ -273,7 +282,11 @@ export type ListAnalysisUnit = {
 export type ListAnalysisTotal = {
   target_id: string
   ev: number
+  ranged_ev: number
+  melee_ev: number
   wounds_per_100_points: number
+  ranged_wounds_per_100_points: number
+  melee_wounds_per_100_points: number
 }
 
 export type ListAnalysisResult = {

@@ -22,14 +22,18 @@ class TargetProfile:
     name: str
     defense: int
     tough: int
+    special_rules: dict[str, Any] | None = None
 
-    def as_dict(self) -> dict[str, str | int]:
-        return {
+    def as_dict(self) -> dict[str, str | int | dict[str, Any]]:
+        result: dict[str, str | int | dict[str, Any]] = {
             "id": self.id,
             "name": self.name,
             "defense": self.defense,
             "tough": self.tough,
         }
+        if self.special_rules:
+            result["special_rules"] = self.special_rules
+        return result
 
 
 def validate_targets(raw_targets: Any) -> tuple[list[TargetProfile], dict[str, str] | None]:
@@ -50,6 +54,9 @@ def validate_targets(raw_targets: Any) -> tuple[list[TargetProfile], dict[str, s
             tough = int(raw_target.get("tough"))
         except (TypeError, ValueError):
             return [], {f"targets.{index}": "Defense and tough must be integers."}
+        special_rules = raw_target.get("special_rules") or {}
+        if not isinstance(special_rules, dict):
+            return [], {f"targets.{index}.special_rules": "Special rules must be an object."}
 
         if not target_id:
             return [], {f"targets.{index}.id": "Target id is required."}
@@ -60,7 +67,7 @@ def validate_targets(raw_targets: Any) -> tuple[list[TargetProfile], dict[str, s
         if tough < 1:
             return [], {f"targets.{index}.tough": "Tough must be at least 1."}
 
-        targets.append(TargetProfile(target_id, name, defense, tough))
+        targets.append(TargetProfile(target_id, name, defense, tough, special_rules))
 
     return targets, None
 
@@ -117,13 +124,16 @@ def _analyze_list_unit(
         for target in targets
     ]
 
+    effective_wounds = total_effective_wounds(entry)
+
     return {
         "list_unit_id": entry.id,
         "unit_id": entry.unit_id,
         "unit_name": entry.unit.name,
         "model_count": entry.model_count,
         "points": points,
-        "effective_wounds_per_100_points": effective_wounds_per_100_points(entry, points),
+        "effective_wounds": effective_wounds,
+        "effective_wounds_per_100_points": effective_wounds_per_100_points(effective_wounds, points),
         "weapon_id": loadout.weapons[0].id,
         "weapon_name": loadout.summary,
         "weapon_names": loadout.weapon_names,
@@ -149,13 +159,36 @@ def _embedded_aura_rules(
     return rules_by_parent
 
 
-def effective_wounds_per_100_points(entry: ListUnit, points: int) -> float:
-    if points <= 0:
-        return 0
+def total_effective_wounds(entry: ListUnit) -> float:
     total_wounds = entry.model_count * max(1, entry.unit.tough) * max(1, entry.combined_from_count)
     failed_save_rate = max(1, entry.unit.defense - 1) / 6
-    effective_wounds = total_wounds / failed_save_rate
+    effective_wounds = total_wounds / failed_save_rate * defensive_wound_multiplier(entry.unit.special_rules)
+    return round(effective_wounds, 6)
+
+
+def effective_wounds_per_100_points(effective_wounds: float, points: int) -> float:
+    if points <= 0:
+        return 0
     return round((effective_wounds / points) * 100, 6)
+
+
+def defensive_wound_multiplier(special_rules: dict[str, Any] | None) -> float:
+    if not special_rules:
+        return 1.0
+    for key, value in special_rules.items():
+        if key.lower() == "regeneration" and bool(value):
+            return 1.5
+    return 1.0
+
+
+def weapon_combat_context(weapon: Any, model_count: int) -> dict[str, Any]:
+    is_melee = weapon.range == 0
+    return {
+        "charging": is_melee,
+        "is_melee": is_melee,
+        "target_over_9": False,
+        "attacking_models": model_count,
+    }
 
 
 def _target_result(
@@ -166,17 +199,35 @@ def _target_result(
     points: int,
 ) -> dict[str, float | str]:
     ev = 0.0
+    ranged_ev = 0.0
+    melee_ev = 0.0
     p_kill_model = 0.0
     for weapon in weapons:
         attacks = weapon.attacks * entry.model_count
         special_rules = {**extra_rules, **weapon.special_rules}
-        ev += calculate_ev(attacks, entry.unit.quality, target.defense, weapon.ap, special_rules)
+        combat_context = weapon_combat_context(weapon, entry.model_count)
+        weapon_ev = calculate_ev(
+            attacks,
+            entry.unit.quality,
+            target.defense,
+            weapon.ap,
+            special_rules,
+            target_special_rules=target.special_rules,
+            combat_context=combat_context,
+        )
+        ev += weapon_ev
+        if weapon.range > 0:
+            ranged_ev += weapon_ev
+        else:
+            melee_ev += weapon_ev
         distribution = calculate_distribution(
             attacks,
             entry.unit.quality,
             target.defense,
             weapon.ap,
             special_rules,
+            target_special_rules=target.special_rules,
+            combat_context=combat_context,
         )
         p_kill_model += sum(
             point["probability"]
@@ -187,7 +238,11 @@ def _target_result(
     return {
         "target_id": target.id,
         "ev": round(ev, 6),
+        "ranged_ev": round(ranged_ev, 6),
+        "melee_ev": round(melee_ev, 6),
         "wounds_per_100_points": round((ev / points) * 100, 6) if points > 0 else 0,
+        "ranged_wounds_per_100_points": round((ranged_ev / points) * 100, 6) if points > 0 else 0,
+        "melee_wounds_per_100_points": round((melee_ev / points) * 100, 6) if points > 0 else 0,
         "p_kill_model": round(min(1, p_kill_model), 6),
     }
 
@@ -197,6 +252,8 @@ def _total_for_target(
     unit_results: list[dict[str, Any] | None],
 ) -> dict[str, float | str]:
     ev = 0.0
+    ranged_ev = 0.0
+    melee_ev = 0.0
     points = 0
     for unit_result in unit_results:
         if unit_result is None:
@@ -206,9 +263,15 @@ def _total_for_target(
             result for result in unit_result["target_results"] if result["target_id"] == target.id
         )
         ev += float(target_result["ev"])
+        ranged_ev += float(target_result["ranged_ev"])
+        melee_ev += float(target_result["melee_ev"])
 
     return {
         "target_id": target.id,
         "ev": round(ev, 6),
+        "ranged_ev": round(ranged_ev, 6),
+        "melee_ev": round(melee_ev, 6),
         "wounds_per_100_points": round((ev / points) * 100, 6) if points > 0 else 0,
+        "ranged_wounds_per_100_points": round((ranged_ev / points) * 100, 6) if points > 0 else 0,
+        "melee_wounds_per_100_points": round((melee_ev / points) * 100, 6) if points > 0 else 0,
     }

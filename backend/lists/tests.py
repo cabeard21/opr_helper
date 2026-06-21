@@ -191,7 +191,7 @@ class ListModelTests(TestCase):
             unit["unit_name"]: unit["target_results"][0]["ev"]
             for unit in analyzed["units"]
         }
-        self.assertEqual(ev_by_name["Guardians"], 2.0)
-        self.assertEqual(ev_by_name["Battle Captain"], 0.333333)
+        self.assertEqual(ev_by_name["Guardians"], 2.222222)
+        self.assertEqual(ev_by_name["Battle Captain"], 0.444444)
         self.assertEqual(ev_by_name["Rangers"], 1.666667)
 

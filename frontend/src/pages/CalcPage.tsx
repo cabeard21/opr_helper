@@ -56,6 +56,8 @@ export function CalcPage() {
   const [customTough, setCustomTough] = useState(1)
   const [stealth, setStealth] = useState(false)
   const [indirect, setIndirect] = useState(false)
+  const [charging, setCharging] = useState(false)
+  const [targetOver9, setTargetOver9] = useState(false)
   const [result, setResult] = useState<CalcResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loadingFactions, setLoadingFactions] = useState(true)
@@ -123,6 +125,7 @@ export function CalcPage() {
           weapon_id: selectedWeapon.id,
           target,
           modifiers: { stealth, indirect },
+          combat_context: { charging, target_over_9: targetOver9 },
         }),
       )
     } catch (err) {
@@ -284,6 +287,14 @@ export function CalcPage() {
             <label className="app-label flex items-center gap-2">
               <input checked={indirect} onChange={(event) => setIndirect(event.target.checked)} type="checkbox" />
               Indirect
+            </label>
+            <label className="app-label flex items-center gap-2">
+              <input checked={charging} onChange={(event) => setCharging(event.target.checked)} type="checkbox" />
+              Charging
+            </label>
+            <label className="app-label flex items-center gap-2">
+              <input checked={targetOver9} onChange={(event) => setTargetOver9(event.target.checked)} type="checkbox" />
+              Target over 9&quot;
             </label>
 
             <button
