@@ -11,21 +11,43 @@ export function FactionUnitsPage() {
   const invalidFactionId = !Number.isFinite(factionId) || factionId <= 0
   const [units, setUnits] = useState<Unit[]>([])
   const [error, setError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(!invalidFactionId)
+  const [loadedFactionId, setLoadedFactionId] = useState<number | null>(null)
+  const [errorFactionId, setErrorFactionId] = useState<number | null>(null)
 
   useEffect(() => {
+    let active = true
+
     if (invalidFactionId) {
-      return
+      return () => {
+        active = false
+      }
     }
 
     apiClient
       .getFactionUnits(factionId)
-      .then(setUnits)
-      .catch((err: Error) => setError(err.message))
-      .finally(() => setLoading(false))
+      .then((nextUnits) => {
+        if (active) {
+          setUnits(nextUnits)
+          setLoadedFactionId(factionId)
+          setError(null)
+          setErrorFactionId(null)
+        }
+      })
+      .catch((err: Error) => {
+        if (active) {
+          setError(err.message)
+          setErrorFactionId(factionId)
+        }
+      })
+
+    return () => {
+      active = false
+    }
   }, [factionId, invalidFactionId])
 
-  const pageError = invalidFactionId ? 'Faction not found.' : error
+  const visibleUnits = loadedFactionId === factionId ? units : []
+  const pageError = invalidFactionId ? 'Faction not found.' : errorFactionId === factionId ? error : null
+  const routeLoading = !invalidFactionId && loadedFactionId !== factionId && errorFactionId !== factionId
 
   return (
     <section>
@@ -40,10 +62,10 @@ export function FactionUnitsPage() {
           Open lists
         </Link>
       </div>
-      {loading ? <p className="app-muted">Loading units...</p> : null}
+      {routeLoading ? <p className="app-muted">Loading units...</p> : null}
       {pageError ? <p className="app-alert-danger">{pageError}</p> : null}
       <div className="grid gap-4 lg:grid-cols-2">
-        {units.map((unit) => (
+        {visibleUnits.map((unit) => (
           <UnitCard key={unit.id} unit={unit} />
         ))}
       </div>
