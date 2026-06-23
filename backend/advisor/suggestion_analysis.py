@@ -225,7 +225,7 @@ def _unit_ev(unit: Unit, model_count: int, combined_from_count: int) -> dict[str
                 weapon.ap,
                 special_rules,
                 target_special_rules=target.special_rules,
-                combat_context=weapon_combat_context(weapon, model_count, target.tough),
+                combat_context=weapon_combat_context(weapon, model_count, target.tough, target.unit_size),
             )
             target_totals[target.id] = round(target_totals[target.id] + ev, 6)
             if weapon.range > 0:

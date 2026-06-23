@@ -94,6 +94,65 @@ class ArmyBooksApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["data"]["ev"], 2.222222)
 
+    def test_calc_endpoint_applies_blast_against_target_unit_size(self):
+        self.unit.quality = 4
+        self.unit.save()
+        self.weapon.attacks = 3
+        self.weapon.ap = 0
+        self.weapon.special_rules = {"Blast": 3}
+        self.weapon.save()
+
+        response = self.client.post(
+            "/api/calc/ev/",
+            {
+                "unit_id": self.unit.id,
+                "weapon_id": self.weapon.id,
+                "target": {"defense": 4, "tough": 1, "unit_size": 3},
+            },
+            format="json",
+        )
+
+        payload = response.json()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["data"]["ev"], 2.25)
+
+    def test_calc_endpoint_defaults_blast_target_unit_size_to_one(self):
+        self.unit.quality = 4
+        self.unit.save()
+        self.weapon.attacks = 3
+        self.weapon.ap = 0
+        self.weapon.special_rules = {"Blast": 3}
+        self.weapon.save()
+
+        response = self.client.post(
+            "/api/calc/ev/",
+            {
+                "unit_id": self.unit.id,
+                "weapon_id": self.weapon.id,
+                "target": {"defense": 4, "tough": 10},
+            },
+            format="json",
+        )
+
+        payload = response.json()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["data"]["ev"], 0.75)
+
+    def test_calc_endpoint_validates_target_unit_size(self):
+        response = self.client.post(
+            "/api/calc/ev/",
+            {
+                "unit_id": self.unit.id,
+                "weapon_id": self.weapon.id,
+                "target": {"defense": 4, "tough": 1, "unit_size": 0},
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIsNone(response.json()["data"])
+        self.assertIn("unit_size", response.json()["error"])
+
     def test_calc_endpoint_accepts_combat_context(self):
         self.weapon.special_rules = {"Impact": 2, "Thrust": True}
         self.weapon.ap = 0

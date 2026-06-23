@@ -224,6 +224,7 @@ export type CalcInput = {
   target: {
     defense: number
     tough: number
+    unit_size?: number
   }
   modifiers?: {
     stealth?: boolean
@@ -253,6 +254,7 @@ export type TargetProfile = {
   name: string
   defense: number
   tough: number
+  unit_size?: number
   special_rules?: Record<string, unknown>
 }
 
@@ -261,9 +263,11 @@ export type UnitTargetResult = {
   ev: number
   ranged_ev: number
   melee_ev: number
+  activation_ev?: number
   wounds_per_100_points: number
   ranged_wounds_per_100_points: number
   melee_wounds_per_100_points: number
+  activation_wounds_per_100_points?: number
   p_kill_model: number
 }
 
@@ -286,9 +290,11 @@ export type ListAnalysisTotal = {
   ev: number
   ranged_ev: number
   melee_ev: number
+  activation_ev?: number
   wounds_per_100_points: number
   ranged_wounds_per_100_points: number
   melee_wounds_per_100_points: number
+  activation_wounds_per_100_points?: number
 }
 
 export type ListAnalysisResult = {

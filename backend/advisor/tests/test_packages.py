@@ -102,11 +102,11 @@ class AdvisorPackageTests(TestCase):
         table = build_package_table(build_advisor_packages(self.faction.id, point_limit=750))
 
         self.assertIn(
-            "| Package | Unit | Pts | Models | Combined | Q | Def | T | AP | EV_inf | EV_eli | EV_mon | W100 | Upgrades | Roles | Caster | Spell Roles | Aura | Embed | Legal |",
+            "| Package | Unit | Pts | Models | Combined | Q | Def | T | AP | Act_inf | Rng_inf | Mel_inf | Act_eli | Act_mon | W100 | Upgrades | Roles | Caster | Spell Roles | Aura | Embed | Legal |",
             table,
         )
         self.assertIn("u", table)
-        self.assertIn("| 1.00 | 0.67 | 0.33 | 1.00 |", table)
+        self.assertIn("| 1.00 | 0.00 | 1.00 | 0.67 | 0.33 | 1.00 |", table)
         self.assertIn("mobility", table)
         self.assertIn("ok", table)
 
@@ -172,6 +172,82 @@ class AdvisorPackageTests(TestCase):
 
         self.assertEqual(packages[melee_unit.id].ev_infantry, 3.777778)
         self.assertEqual(packages[ranged_unit.id].ev_infantry, 2.0)
+
+    def test_package_hybrid_upgrade_uses_best_activation_lane_not_sum(self):
+        unit = self._unit(name="Quest Knights", points=100)
+        bow = Weapon.objects.create(
+            name="Short Bow",
+            range=18,
+            attacks=1,
+            attacks_string="A1",
+            ap=0,
+        )
+        section = UnitUpgradeSection.objects.create(
+            unit=unit,
+            section_uid="quest-knight-bow",
+            label="Take Bows",
+            variant="upgrade",
+        )
+        option = UnitUpgradeOption.objects.create(
+            section=section,
+            option_uid="short-bow",
+            label="Short Bows",
+            cost=15,
+        )
+        option.weapons.add(bow)
+
+        package = next(
+            candidate for candidate in build_advisor_packages(self.faction.id, point_limit=750)
+            if candidate.selected_upgrade_ids == [option.id]
+        )
+
+        self.assertEqual(package.ranged_ev_infantry, 0.333333)
+        self.assertEqual(package.melee_ev_infantry, 1.0)
+        self.assertEqual(package.ev_infantry, 1.0)
+        self.assertEqual(package.wounds_per_100pts_infantry, round((1.0 / 115) * 100, 6))
+        self.assertIn("melee-threat", package.role_tags)
+        self.assertIn("ranged-tax-risk", package.role_tags)
+
+    def test_package_support_hybrid_marks_meaningful_ranged_flex(self):
+        staff = Weapon.objects.create(
+            name="Staff",
+            range=0,
+            attacks=1,
+            attacks_string="A1",
+            ap=0,
+        )
+        unit = self._unit(name="Battle Mage", points=100, special_rules={"Caster": 1}, weapon=staff)
+        bolt = Weapon.objects.create(
+            name="Magic Bolt",
+            range=18,
+            attacks=1,
+            attacks_string="A1",
+            ap=0,
+        )
+        section = UnitUpgradeSection.objects.create(
+            unit=unit,
+            section_uid="battle-mage-bolt",
+            label="Take Bolt",
+            variant="upgrade",
+        )
+        option = UnitUpgradeOption.objects.create(
+            section=section,
+            option_uid="magic-bolt",
+            label="Magic Bolt",
+            cost=5,
+        )
+        option.weapons.add(bolt)
+
+        package = next(
+            candidate for candidate in build_advisor_packages(self.faction.id, point_limit=750)
+            if candidate.selected_upgrade_ids == [option.id]
+        )
+
+        self.assertEqual(package.ranged_ev_infantry, 0.333333)
+        self.assertEqual(package.melee_ev_infantry, 0.333333)
+        self.assertEqual(package.ev_infantry, 0.333333)
+        self.assertIn("hybrid-flex", package.role_tags)
+        self.assertIn("support", package.role_tags)
 
     def test_package_offense_and_roles_value_disintegrate_against_elite_defense(self):
         hex_weapon = Weapon.objects.create(

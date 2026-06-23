@@ -35,6 +35,8 @@ class AdvisorPackage:
     ev_infantry: float
     ev_elite: float
     ev_monster: float
+    ranged_ev_infantry: float
+    melee_ev_infantry: float
     wounds_per_100pts_infantry: float
     role_tags: tuple[str, ...]
     aura_rules: tuple[str, ...]
@@ -80,13 +82,13 @@ def build_advisor_packages(faction_id: int, point_limit: int) -> list[AdvisorPac
 
 def build_package_table(packages: list[AdvisorPackage]) -> str:
     lines = [
-        "| Package | Unit | Pts | Models | Combined | Q | Def | T | AP | EV_inf | EV_eli | EV_mon | W100 | Upgrades | Roles | Caster | Spell Roles | Aura | Embed | Legal |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| Package | Unit | Pts | Models | Combined | Q | Def | T | AP | Act_inf | Rng_inf | Mel_inf | Act_eli | Act_mon | W100 | Upgrades | Roles | Caster | Spell Roles | Aura | Embed | Legal |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for package in packages:
         lines.append(
             "| {package_id} | {unit} | {points} | {models} | {combined} | {quality}+ | {defense}+ | "
-            "{tough} | {ap} | {ev_inf:.2f} | {ev_eli:.2f} | {ev_mon:.2f} | {w100:.2f} | "
+            "{tough} | {ap} | {ev_inf:.2f} | {rng_inf:.2f} | {mel_inf:.2f} | {ev_eli:.2f} | {ev_mon:.2f} | {w100:.2f} | "
             "{upgrades} | {roles} | {caster} | {spell_roles} | {aura} | {embed} | {legal} |".format(
                 package_id=package.package_id,
                 unit=_compact(package.unit_name, 36),
@@ -98,6 +100,8 @@ def build_package_table(packages: list[AdvisorPackage]) -> str:
                 tough=package.tough,
                 ap=package.max_ap,
                 ev_inf=package.ev_infantry,
+                rng_inf=package.ranged_ev_infantry,
+                mel_inf=package.melee_ev_infantry,
                 ev_eli=package.ev_elite,
                 ev_mon=package.ev_monster,
                 w100=package.wounds_per_100pts_infantry,
@@ -220,8 +224,10 @@ def _package_for_unit(
         upgrade_cost=upgrade_cost,
         combined_count=combined_from_count,
     )
-    target_results = _target_scores(unit, model_count, points, combined_from_count)
     caster_level = _caster_level(unit.special_rules)
+    selected_ids = selected_upgrade_ids or []
+    weapons, extra_rules = _variant_weapons_and_rules(unit, selected_ids)
+    target_results = _target_scores(unit, model_count, points, combined_from_count, weapons, extra_rules)
     return AdvisorPackage(
         package_id=_package_id(unit.id, package_suffix, combined_from_count),
         unit_id=unit.id,
@@ -234,12 +240,14 @@ def _package_for_unit(
         quality=unit.quality,
         defense=unit.defense,
         tough=unit.tough,
-        max_ap=_max_ap(unit),
+        max_ap=_max_ap(weapons),
         ev_infantry=target_results["infantry"]["ev"],
         ev_elite=target_results["elite"]["ev"],
         ev_monster=target_results["monster"]["ev"],
+        ranged_ev_infantry=target_results["infantry"]["ranged_ev"],
+        melee_ev_infantry=target_results["infantry"]["melee_ev"],
         wounds_per_100pts_infantry=target_results["infantry"]["wounds_per_100_points"],
-        role_tags=_role_tags(unit, points, point_limit, caster_level),
+        role_tags=_role_tags(unit, points, point_limit, caster_level, weapons, extra_rules),
         aura_rules=_aura_rules(unit, selected_upgrade_ids or []),
         caster_level=caster_level,
         spell_role_tags=spell_role_tags if caster_level else (),
@@ -315,8 +323,8 @@ def _default_model_count(unit: Unit) -> int:
     return min(model_count, effective_max_models(unit))
 
 
-def _max_ap(unit: Unit) -> int:
-    return max((slot.weapon.ap for slot in unit.weapon_slots.all() if slot.is_default), default=0)
+def _max_ap(weapons: list[Any]) -> int:
+    return max((weapon.ap for weapon in weapons), default=0)
 
 
 def _target_scores(
@@ -324,10 +332,14 @@ def _target_scores(
     model_count: int,
     points: int,
     combined_from_count: int = 1,
+    weapons: list[Any] | None = None,
+    extra_rules: dict[str, Any] | None = None,
 ) -> dict[str, dict[str, float]]:
     targets = default_target_profiles()
+    selected_weapons = weapons if weapons is not None else _variant_weapons_and_rules(unit)[0]
+    selected_extra_rules = extra_rules or {}
     return {
-        target.id: _target_score(unit, model_count, points, target, combined_from_count)
+        target.id: _target_score(unit, model_count, points, target, combined_from_count, selected_weapons, selected_extra_rules)
         for target in targets
     }
 
@@ -338,40 +350,74 @@ def _target_score(
     points: int,
     target: TargetProfile,
     combined_from_count: int = 1,
+    weapons: list[Any] | None = None,
+    extra_rules: dict[str, Any] | None = None,
 ) -> dict[str, float]:
+    weapons = weapons if weapons is not None else _variant_weapons_and_rules(unit)[0]
+    extra_rules = extra_rules or {}
     ev = 0.0
-    for slot in unit.weapon_slots.all():
-        if not slot.is_default:
-            continue
-        weapon = slot.weapon
+    ranged_ev = 0.0
+    melee_ev = 0.0
+    for weapon in weapons:
         attacks = weapon.attacks * model_count * max(1, combined_from_count)
-        special_rules = {**unit.special_rules, **weapon.special_rules}
-        ev += calculate_ev(
+        special_rules = {**unit.special_rules, **extra_rules, **weapon.special_rules}
+        weapon_ev = calculate_ev(
             attacks,
             unit.quality,
             target.defense,
             weapon.ap,
             special_rules,
             target_special_rules=target.special_rules,
-            combat_context=weapon_combat_context(weapon, model_count, target.tough),
+            combat_context=weapon_combat_context(weapon, model_count, target.tough, target.unit_size),
         )
+        ev += weapon_ev
+        if weapon.range > 0:
+            ranged_ev += weapon_ev
+        else:
+            melee_ev += weapon_ev
+    activation_ev = max(ranged_ev, melee_ev)
     return {
-        "ev": round(ev, 6),
-        "wounds_per_100_points": round((ev / points) * 100, 6) if points > 0 else 0,
+        "ev": round(activation_ev, 6),
+        "summed_ev": round(ev, 6),
+        "ranged_ev": round(ranged_ev, 6),
+        "melee_ev": round(melee_ev, 6),
+        "wounds_per_100_points": round((activation_ev / points) * 100, 6) if points > 0 else 0,
     }
 
 
-def _role_tags(unit: Unit, points: int, point_limit: int, caster_level: str = "") -> tuple[str, ...]:
+def _role_tags(
+    unit: Unit,
+    points: int,
+    point_limit: int,
+    caster_level: str = "",
+    weapons: list[Any] | None = None,
+    extra_rules: dict[str, Any] | None = None,
+) -> tuple[str, ...]:
     tags: list[str] = ["hero" if is_hero(unit) else "core"]
+    weapons = weapons if weapons is not None else _variant_weapons_and_rules(unit)[0]
+    combined_rules = {**(unit.special_rules or {}), **(extra_rules or {})}
+    ranged_ev = _lane_ev(unit, weapons, combined_rules, ranged=True)
+    melee_ev = _lane_ev(unit, weapons, combined_rules, ranged=False)
     if _has_any_rule(unit, ("Scout", "Fast", "Flying", "Strider", "Ambush")):
         tags.append("mobility")
-    if any(slot.is_default and slot.weapon.range > 0 for slot in unit.weapon_slots.all()):
+    if any(weapon.range > 0 for weapon in weapons):
         tags.append("ranged")
+    if ranged_ev > 0 and ranged_ev >= melee_ev:
+        tags.append("ranged-pressure")
+    if melee_ev > 0 and melee_ev >= ranged_ev:
+        tags.append("melee-threat")
+    weaker_lane = min(value for value in (ranged_ev, melee_ev) if value > 0) if ranged_ev > 0 and melee_ev > 0 else 0
+    stronger_lane = max(ranged_ev, melee_ev)
+    if weaker_lane > 0 and stronger_lane > 0:
+        if weaker_lane >= stronger_lane * 0.5:
+            tags.append("hybrid-flex")
+        elif ranged_ev < melee_ev and ranged_ev <= melee_ev * 0.35:
+            tags.append("ranged-tax-risk")
     if (
-        _max_ap(unit) >= 2
+        _max_ap(weapons) >= 2
         or unit.tough >= 3
-        or _has_disintegrate_weapon(unit)
-        or _has_any_rule(unit, ("Melee Slayer", "Ranged Slayer"))
+        or _has_disintegrate_weapon(weapons)
+        or _has_any_rule_from(combined_rules, ("Melee Slayer", "Ranged Slayer"))
     ):
         tags.append("anti-tough")
     if point_limit > 0 and points <= point_limit * 0.12:
@@ -499,14 +545,73 @@ def _has_any_rule(unit: Unit, names: tuple[str, ...]) -> bool:
     return any(name.lower() in normalized for name in names)
 
 
-def _has_disintegrate_weapon(unit: Unit) -> bool:
-    for slot in unit.weapon_slots.all():
-        if not slot.is_default:
+def _variant_weapons_and_rules(unit: Unit, selected_upgrade_ids: list[int] | None = None) -> tuple[list[Any], dict[str, Any]]:
+    weapons = [slot.weapon for slot in unit.weapon_slots.all() if slot.is_default]
+    if not weapons:
+        weapons = [slot.weapon for slot in unit.weapon_slots.all()[:1]]
+    extra_rules: dict[str, Any] = {}
+    selected = set(selected_upgrade_ids or [])
+    if not selected:
+        return weapons, extra_rules
+
+    for option in _upgrade_options(unit):
+        if option.id not in selected:
             continue
-        rules = slot.weapon.special_rules or {}
+        if option.section.variant.lower() == "replace":
+            targets = {str(target).lower() for target in option.section.targets}
+            weapons = [weapon for weapon in weapons if weapon.name.lower() not in targets]
+        weapons = [*weapons, *option.weapons.all()]
+        gained_rules, _aura_rules = split_aura_rules(dict(_gain_rules(option.gains)))
+        extra_rules = {**extra_rules, **gained_rules}
+    return weapons, extra_rules
+
+
+def _gain_rules(gains: list[dict[str, Any]]):
+    for gain in gains:
+        if not isinstance(gain, dict):
+            continue
+        content = gain.get("content")
+        if not isinstance(content, list):
+            continue
+        for rule in content:
+            if not isinstance(rule, dict):
+                continue
+            name = rule.get("name")
+            if name:
+                yield str(name), rule.get("rating", True)
+
+
+def _lane_ev(unit: Unit, weapons: list[Any], extra_rules: dict[str, Any], *, ranged: bool) -> float:
+    target = default_target_profiles()[0]
+    ev = 0.0
+    for weapon in weapons:
+        if (weapon.range > 0) != ranged:
+            continue
+        attacks = weapon.attacks * _default_model_count(unit)
+        special_rules = {**(unit.special_rules or {}), **extra_rules, **(weapon.special_rules or {})}
+        ev += calculate_ev(
+            attacks,
+            unit.quality,
+            target.defense,
+            weapon.ap,
+            special_rules,
+            target_special_rules=target.special_rules,
+            combat_context=weapon_combat_context(weapon, _default_model_count(unit), target.tough, target.unit_size),
+        )
+    return ev
+
+
+def _has_disintegrate_weapon(weapons: list[Any]) -> bool:
+    for weapon in weapons:
+        rules = weapon.special_rules or {}
         if any(key.lower() == "disintegrate" and bool(value) for key, value in rules.items()):
             return True
     return False
+
+
+def _has_any_rule_from(rules: dict[str, Any], names: tuple[str, ...]) -> bool:
+    normalized = {key.lower() for key, value in rules.items() if value}
+    return any(name.lower() in normalized for name in names)
 
 
 def _compact(value: str, max_length: int) -> str:

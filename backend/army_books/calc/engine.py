@@ -89,8 +89,6 @@ def _raw_distribution(
 
 
 def _attack_count(attacks: float, special_rules: dict[str, Any] | None) -> int:
-    if has_rule(special_rules, "Blast"):
-        return int_rule(special_rules, "Blast", 1)
     return max(0, int(round(attacks)))
 
 
@@ -104,35 +102,16 @@ def _single_attack_distribution(
     target_special_rules: dict[str, Any] | None,
     combat_context: dict[str, Any] | None,
 ) -> list[float]:
-    if has_rule(special_rules, "Blast"):
-        attack_ap = _effective_attack_ap(
-            ap=ap,
-            defense=defense,
-            special_rules=special_rules,
-            hit_roll=None,
-            combat_context=combat_context,
-        )
-        wound_probability = p_fail_defense(defense, attack_ap) * _regeneration_multiplier(
-            special_rules,
-            target_special_rules,
-            hit_roll=None,
-        )
-    else:
-        return _single_attack_distribution_from_hit_rolls(
-            quality=quality,
-            defense=defense,
-            ap=ap,
-            deadly=deadly,
-            special_rules=special_rules,
-            modifiers=modifiers,
-            target_special_rules=target_special_rules,
-            combat_context=combat_context,
-        )
-
-    distribution = [0.0] * (deadly + 1)
-    distribution[0] = 1 - wound_probability
-    distribution[deadly] = wound_probability
-    return distribution
+    return _single_attack_distribution_from_hit_rolls(
+        quality=quality,
+        defense=defense,
+        ap=ap,
+        deadly=deadly,
+        special_rules=special_rules,
+        modifiers=modifiers,
+        target_special_rules=target_special_rules,
+        combat_context=combat_context,
+    )
 
 
 def _single_attack_distribution_from_hit_rolls(
@@ -146,7 +125,10 @@ def _single_attack_distribution_from_hit_rolls(
     combat_context: dict[str, Any] | None,
 ) -> list[float]:
     attack_ap = ap + (1 if _thrust_applies(special_rules, combat_context) else 0)
-    target = clamp_target(quality + _effective_hit_modifier(special_rules, modifiers, combat_context))
+    target = clamp_target(
+        _effective_quality(quality, special_rules)
+        + _effective_hit_modifier(special_rules, modifiers, combat_context)
+    )
     normal_hit_rolls = [roll for roll in range(target, 7)]
 
     distribution = [1.0]
@@ -180,6 +162,7 @@ def _successful_hit_distribution(
     hit_roll: int,
     extra_hit_count: int,
 ) -> list[float]:
+    blast_multiplier = _blast_multiplier(special_rules, combat_context)
     original_distribution = _hit_wound_distribution(
         defense=defense,
         ap=ap,
@@ -189,6 +172,7 @@ def _successful_hit_distribution(
         combat_context=combat_context,
         hit_roll=hit_roll,
     )
+    original_distribution = repeated_convolution(original_distribution, blast_multiplier)
     extra_hit_distribution = _hit_wound_distribution(
         defense=defense,
         ap=ap,
@@ -200,7 +184,7 @@ def _successful_hit_distribution(
     )
     return convolve(
         original_distribution,
-        repeated_convolution(extra_hit_distribution, extra_hit_count),
+        repeated_convolution(extra_hit_distribution, extra_hit_count * blast_multiplier),
     )
 
 
@@ -307,6 +291,23 @@ def _effective_hit_modifier(
     return modifier
 
 
+def _effective_quality(quality: float, special_rules: dict[str, Any] | None) -> float:
+    if _rule_enabled(special_rules, "Reliable"):
+        return 2
+    return quality
+
+
+def _blast_multiplier(
+    special_rules: dict[str, Any] | None,
+    combat_context: dict[str, Any] | None,
+) -> int:
+    if not _rule_enabled(special_rules, "Blast"):
+        return 1
+    blast_hits = max(1, int_rule(special_rules, "Blast", 1))
+    target_unit_size = max(1, _context_int(combat_context, "target_unit_size", 1))
+    return min(blast_hits, target_unit_size)
+
+
 def _extra_hit_count(
     special_rules: dict[str, Any] | None,
     combat_context: dict[str, Any] | None,
@@ -364,6 +365,12 @@ def _context_int(combat_context: dict[str, Any] | None, name: str, default: int)
         return int((combat_context or {}).get(name, default))
     except (TypeError, ValueError):
         return default
+
+
+def _rule_enabled(rules: dict[str, Any] | None, name: str) -> bool:
+    if not rules:
+        return False
+    return any(key.lower() == name.lower() and bool(value) for key, value in rules.items())
 
 
 def _regeneration_multiplier(

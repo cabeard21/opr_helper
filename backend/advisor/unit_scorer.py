@@ -122,7 +122,7 @@ def _target_score(
         weapon = slot.weapon
         attacks = weapon.attacks * unit.default_models
         special_rules = {**unit.special_rules, **weapon.special_rules}
-        combat_context = weapon_combat_context(weapon, unit.default_models, target.tough)
+        combat_context = weapon_combat_context(weapon, unit.default_models, target.tough, target.unit_size)
         ev += calculate_ev(
             attacks,
             unit.quality,

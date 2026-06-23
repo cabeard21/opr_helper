@@ -1,3 +1,4 @@
 - Possibly increase the fixed target that damage is normalized against
 - Add deployment/objective placement context
 - Feature to provide tips to playing the list in a given scenario/matchup
+- Account for the fact that units can't shoot and charge

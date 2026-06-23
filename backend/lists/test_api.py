@@ -911,6 +911,46 @@ class ListsApiTests(TestCase):
         self.assertEqual(target_result["ev"], 0.888889)
         self.assertEqual(target_result["wounds_per_100_points"], round((0.888889 / 180) * 100, 6))
 
+    def test_analyze_list_applies_blast_to_infantry_and_elite_targets_only(self):
+        self.unit.quality = 4
+        self.unit.save()
+        self.weapon.attacks = 3
+        self.weapon.ap = 0
+        self.weapon.special_rules = {"Blast": 3}
+        self.weapon.save()
+        army_list = ArmyList.objects.create(
+            name="Tournament 2000",
+            faction=self.faction,
+            point_limit=2000,
+        )
+        ListUnit.objects.create(
+            army_list=army_list,
+            unit=self.unit,
+            model_count=1,
+            selected_weapon_slot=self.slot,
+        )
+
+        response = self.client.post(
+            f"/api/lists/{army_list.id}/analysis/",
+            {
+                "targets": [
+                    {"id": "infantry", "name": "Infantry", "defense": 4, "tough": 1},
+                    {"id": "elite", "name": "Elite", "defense": 4, "tough": 3},
+                    {"id": "monster", "name": "Monster", "defense": 4, "tough": 10},
+                ]
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        results = {
+            result["target_id"]: result
+            for result in response.json()["data"]["units"][0]["target_results"]
+        }
+        self.assertEqual(results["infantry"]["ev"], 2.25)
+        self.assertEqual(results["elite"]["ev"], 2.25)
+        self.assertEqual(results["monster"]["ev"], 0.75)
+
     def test_analyze_list_uses_upgrade_cost_for_efficiency(self):
         army_list = ArmyList.objects.create(
             name="Tournament 2000",
@@ -985,17 +1025,20 @@ class ListsApiTests(TestCase):
         self.assertEqual(unit_result["weapon_name"], "Stomp + Twin Arm-Flamethrowers")
         self.assertEqual(unit_result["weapon_names"], ["Stomp", "Twin Arm-Flamethrowers"])
         target_result = unit_result["target_results"][0]
-        self.assertEqual(target_result["ev"], 1.5)
-        self.assertEqual(target_result["ranged_ev"], 1.0)
+        self.assertEqual(target_result["ev"], 1.333333)
+        self.assertEqual(target_result["ranged_ev"], 0.833333)
         self.assertEqual(target_result["melee_ev"], 0.5)
+        self.assertEqual(target_result["activation_ev"], 0.833333)
         self.assertEqual(
             target_result["ev"],
             round(target_result["ranged_ev"] + target_result["melee_ev"], 6),
         )
-        self.assertEqual(target_result["ranged_wounds_per_100_points"], round((1.0 / 270) * 100, 6))
+        self.assertEqual(target_result["ranged_wounds_per_100_points"], round((0.833333 / 270) * 100, 6))
         self.assertEqual(target_result["melee_wounds_per_100_points"], round((0.5 / 270) * 100, 6))
-        self.assertEqual(response.json()["data"]["totals"][0]["ranged_ev"], 1.0)
+        self.assertEqual(target_result["activation_wounds_per_100_points"], round((0.833333 / 270) * 100, 6))
+        self.assertEqual(response.json()["data"]["totals"][0]["ranged_ev"], 0.833333)
         self.assertEqual(response.json()["data"]["totals"][0]["melee_ev"], 0.5)
+        self.assertEqual(response.json()["data"]["totals"][0]["activation_ev"], 0.833333)
 
     def test_analyze_list_default_monster_target_has_regeneration(self):
         army_list = ArmyList.objects.create(

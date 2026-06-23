@@ -111,7 +111,7 @@ describe('CalcPage', () => {
       expect(apiClient.calculateEv).toHaveBeenCalledWith({
         unit_id: 10,
         weapon_id: 30,
-        target: { defense: 5, tough: 1 },
+        target: { defense: 5, tough: 1, unit_size: 3 },
         modifiers: { stealth: false, indirect: false },
         combat_context: { charging: false, target_over_9: false },
       })
@@ -178,7 +178,7 @@ describe('CalcPage', () => {
     await waitFor(() => {
       expect(apiClient.calculateEv).toHaveBeenCalledWith(
         expect.objectContaining({
-          target: { defense: 2, tough: 10, special_rules: { Regeneration: true } },
+          target: { defense: 2, tough: 10, unit_size: 1, special_rules: { Regeneration: true } },
         }),
       )
     })

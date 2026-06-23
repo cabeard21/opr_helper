@@ -1124,9 +1124,11 @@ function buildListHealthMetrics(
   const mobileEntries = effectiveEntries.filter((entry) => entryHasAnyRule(entry, unitLookup, MOBILITY_RULES))
   const castingTarget = armyList.point_limit >= 1500 ? 3 : 1
   const castingPower = totalCastingPower(armyList, unitLookup)
-  const averageWoundsPer100 = average(analysis.totals.map((total) => total.wounds_per_100_points))
+  const averageWoundsPer100 = average(analysis.totals.map(activationWoundsPer100))
   const averageDurability = average(analysis.units.map((unit) => unit.effective_wounds_per_100_points))
-  const weakestTarget = [...analysis.totals].sort((left, right) => left.wounds_per_100_points - right.wounds_per_100_points)[0]
+  const weakestTarget = [...analysis.totals].sort(
+    (left, right) => activationWoundsPer100(left) - activationWoundsPer100(right),
+  )[0]
   const weakestTargetName = analysis.targets.find((target) => target.id === weakestTarget?.target_id)?.name ?? 'No target'
   const totalRanged = analysis.totals.reduce((sum, total) => sum + total.ranged_ev, 0)
   const totalMelee = analysis.totals.reduce((sum, total) => sum + total.melee_ev, 0)
@@ -1158,7 +1160,7 @@ function buildListHealthMetrics(
       'damage-pressure',
       'Damage Pressure',
       clampScore((averageWoundsPer100 / 0.75) * 100),
-      `${averageWoundsPer100.toFixed(2)} avg wounds / 100 pts`,
+      `${averageWoundsPer100.toFixed(2)} avg activation wounds / 100 pts`,
     ),
     metric(
       'durability',
@@ -1169,8 +1171,8 @@ function buildListHealthMetrics(
     metric(
       'threat-coverage',
       'Threat Coverage',
-      clampScore(((weakestTarget?.wounds_per_100_points ?? 0) / 0.6) * 100),
-      `${weakestTargetName} is the lowest lane at ${(weakestTarget?.wounds_per_100_points ?? 0).toFixed(2)} wounds / 100 pts`,
+      clampScore((activationWoundsPer100(weakestTarget) / 0.6) * 100),
+      `${weakestTargetName} is the lowest lane at ${activationWoundsPer100(weakestTarget).toFixed(2)} activation wounds / 100 pts`,
     ),
     metric(
       'battleline-balance',
@@ -1191,6 +1193,10 @@ function metric(id: string, label: string, score: number, summary: string): List
     status: metricStatus(score),
     summary,
   }
+}
+
+function activationWoundsPer100(result?: { activation_wounds_per_100_points?: number; wounds_per_100_points: number }) {
+  return result?.activation_wounds_per_100_points ?? result?.wounds_per_100_points ?? 0
 }
 
 function graphAxisLabel(metric: ListHealthMetric) {
@@ -1381,9 +1387,11 @@ function resultFor(unit: ListAnalysisUnit, targetId: string) {
       ev: 0,
       ranged_ev: 0,
       melee_ev: 0,
+      activation_ev: 0,
       wounds_per_100_points: 0,
       ranged_wounds_per_100_points: 0,
       melee_wounds_per_100_points: 0,
+      activation_wounds_per_100_points: 0,
       p_kill_model: 0,
     }
   )

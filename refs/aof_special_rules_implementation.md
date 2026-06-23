@@ -27,7 +27,7 @@ Primary implementation seams:
 | AP(X) | High | Parsed into `weapon.ap` and applied in EV math. Caveat: defense auto-success-on-6 edge is not modeled. |
 | Artillery | None | No Hold-only, long-range hit bonus, or incoming penalty. |
 | Bane | Partial | Ignores target Regeneration; missing forced reroll of unmodified Defense 6s. |
-| Blast(X) | Partial | Included in EV, but simplified as fixed attack count and no hit roll; missing per-hit multiplication, target model cap, and cover behavior. |
+| Blast(X) | High | Successful hit rolls are multiplied by Blast(X), capped by target unit size. Built-in infantry and elite targets apply the multiplier; monster targets are treated as unit size 1. |
 | Caster(X) | Partial | Army Forge faction spells are synced and surfaced to the advisor; caster level and spell roles are exposed in advisor packages. No spell-token simulator, casting odds, blocking, or spell-resolution engine. |
 | Counter | None | No strikes-first or Impact reduction. |
 | Deadly(X) | High | Wound multiplication and distribution modeled; wound assignment/no-carryover details are not. |
@@ -45,7 +45,7 @@ Primary implementation seams:
 | Melee Slayer | Partial | Charging melee attacks get AP(+2) against Tough(3)+ targets in calculator, list analysis, and advisor scoring; no full charge/matchup simulator. |
 | Regeneration | High | Defender-side wound ignore modeled as `2/3` wound multiplier; durability scoring uses `1.5`; Bane/Rending bypass handled. |
 | Relentless | Partial | Extra hit on unmodified shooting 6s is modeled when combat context marks the target as over 9"; full range/line-of-sight flow is not modeled. |
-| Reliable | None | Stored, but attacks are not changed to Quality 2+. |
+| Reliable | High | Attacks use Quality 2+ in combat math before existing hit modifiers are applied. |
 | Rending | High | All Rending hits ignore Regeneration; natural 6 hits get exact AP(+4). |
 | Scout | Partial | Advisor/list-health mobility signal; no deployment behavior. |
 | Slow | None | No movement penalty. |
@@ -60,7 +60,7 @@ Primary implementation seams:
 
 Summary:
 
-- Strongest modeled rules: AP, Deadly, Disintegrate, Regeneration, Rending, Surge, Tough.
-- Partially modeled combat rules: Bane, Blast, Furious, Impact, Indirect, Melee Slayer, Relentless, Sergeant, Stealth, Thrust, Unstoppable.
+- Strongest modeled rules: AP, Blast, Deadly, Disintegrate, Regeneration, Reliable, Rending, Surge, Tough.
+- Partially modeled combat rules: Bane, Furious, Impact, Indirect, Melee Slayer, Relentless, Sergeant, Stealth, Thrust, Unstoppable.
 - Strategic/advisor signals: Ambush, Fast, Fearless, Flying, Scout, Strider, plus support tagging for Regeneration and Stealth.
 - Mostly absent categories: movement/deployment simulation, morale, full spell resolution, terrain interaction, once-per-game tracking, individual model targeting, and charge-only context.

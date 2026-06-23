@@ -30,6 +30,27 @@ def test_base_distribution_is_exact_and_sums_to_one():
     assert calculate_ev(3, 4, 4, 0, {}) == pytest.approx(0.75)
 
 
+def test_reliable_attacks_use_quality_two_plus():
+    assert calculate_ev(6, 5, 4, 0, {"Reliable": True}) == pytest.approx(6 * (5 / 6) * 0.5)
+
+
+def test_reliable_still_respects_hit_penalties():
+    assert calculate_ev(
+        6,
+        5,
+        4,
+        0,
+        {"Reliable": True},
+        modifiers={"stealth": True},
+    ) == pytest.approx(6 * (4 / 6) * 0.5)
+
+
+def test_reliable_keeps_natural_six_extra_hit_semantics():
+    ev = calculate_ev(6, 5, 4, 0, {"Reliable": True, "Surge": True})
+
+    assert ev == pytest.approx(6 * ((4 / 6) * 0.5 + (1 / 6) * 2 * 0.5))
+
+
 def test_ap_and_deadly_increase_expected_wounds():
     assert calculate_ev(3, 4, 4, 2, {}) == pytest.approx(3 * 0.5 * (5 / 6))
     assert calculate_ev(3, 4, 4, 0, {"Deadly": 3}) == pytest.approx(2.25)
@@ -126,9 +147,16 @@ def test_disintegrate_composes_with_rending_without_double_counting_natural_six_
 
 
 def test_disintegrate_ap_bonus_applies_to_blast():
-    ev = calculate_ev(6, 4, 3, 0, {"Blast": 3, "Disintegrate": True})
+    ev = calculate_ev(
+        6,
+        4,
+        3,
+        0,
+        {"Blast": 3, "Disintegrate": True},
+        combat_context={"target_unit_size": 3},
+    )
 
-    assert ev == pytest.approx(3 * (4 / 6))
+    assert ev == pytest.approx(6 * 0.5 * 3 * (4 / 6))
 
 
 def test_rending_ignores_regeneration_on_all_hits_and_adds_ap_on_natural_six():
@@ -145,8 +173,70 @@ def test_rending_ignores_regeneration_on_all_hits_and_adds_ap_on_natural_six():
     assert ev == pytest.approx(6 * expected_per_attack)
 
 
-def test_blast_skips_hit_rolls_and_furious_requires_charge():
-    assert calculate_ev(3, 4, 4, 0, {"Blast": 2}) == pytest.approx(2 * 0.5)
+def test_blast_multiplies_successful_hits_up_to_target_unit_size():
+    assert calculate_ev(
+        3,
+        4,
+        4,
+        0,
+        {"Blast": 2},
+        combat_context={"target_unit_size": 10},
+    ) == pytest.approx(3 * 0.5 * 2 * 0.5)
+    assert calculate_ev(
+        3,
+        4,
+        4,
+        0,
+        {"Blast": 3},
+        combat_context={"target_unit_size": 2},
+    ) == pytest.approx(3 * 0.5 * 2 * 0.5)
+    assert calculate_ev(3, 4, 4, 0, {"Blast": 3}) == pytest.approx(3 * 0.5 * 0.5)
+
+
+def test_blast_uses_hit_rolls_and_composes_with_reliable_and_rending():
+    assert calculate_ev(
+        3,
+        4,
+        4,
+        0,
+        {"Blast": 2},
+        modifiers={"stealth": True},
+        combat_context={"target_unit_size": 10},
+    ) == pytest.approx(3 * (2 / 6) * 2 * 0.5)
+    assert calculate_ev(
+        3,
+        5,
+        4,
+        0,
+        {"Blast": 2, "Reliable": True},
+        combat_context={"target_unit_size": 10},
+    ) == pytest.approx(3 * (5 / 6) * 2 * 0.5)
+    assert calculate_ev(
+        6,
+        4,
+        2,
+        0,
+        {"Blast": 2, "Rending": True},
+        combat_context={"target_unit_size": 10},
+    ) == pytest.approx(6 * ((1 / 6) * 2 * (5 / 6) + (2 / 6) * 2 * (1 / 6)))
+
+
+def test_blast_distribution_expands_wound_outcomes_and_sums_to_one():
+    distribution = calculate_distribution(
+        1,
+        4,
+        4,
+        0,
+        {"Blast": 3},
+        combat_context={"target_unit_size": 10},
+    )
+
+    assert [point["wounds"] for point in distribution] == [0, 1, 2, 3]
+    assert sum(point["probability"] for point in distribution) == pytest.approx(1)
+    assert distribution[3]["probability"] == pytest.approx(0.5 * (0.5 ** 3))
+
+
+def test_furious_requires_charge():
     assert calculate_ev(6, 4, 4, 0, {"Furious": True}) == pytest.approx(6 * 0.5 * 0.5)
     assert calculate_ev(
         6,

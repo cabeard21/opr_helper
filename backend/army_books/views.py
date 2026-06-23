@@ -85,6 +85,17 @@ def calculate_ev_view(request):
             status.HTTP_400_BAD_REQUEST,
         )
 
+    try:
+        target_unit_size = int(target.get("unit_size", combat_context.get("target_unit_size", 1)))
+        if target_unit_size < 1:
+            raise ValueError
+    except (TypeError, ValueError):
+        return envelope(
+            None,
+            "Target unit_size must be a positive integer.",
+            status.HTTP_400_BAD_REQUEST,
+        )
+
     target_special_rules = target.get("special_rules") or {}
     if not isinstance(target_special_rules, dict):
         return envelope(
@@ -99,6 +110,7 @@ def calculate_ev_view(request):
         "is_melee": weapon.range == 0,
         "attacking_models": 1,
         "target_tough": target_tough,
+        "target_unit_size": target_unit_size,
     }
     ev = calculate_ev(
         weapon.attacks,
