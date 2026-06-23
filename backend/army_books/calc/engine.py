@@ -110,6 +110,7 @@ def _single_attack_distribution(
             defense=defense,
             special_rules=special_rules,
             hit_roll=None,
+            combat_context=combat_context,
         )
         wound_probability = p_fail_defense(defense, attack_ap) * _regeneration_multiplier(
             special_rules,
@@ -156,6 +157,7 @@ def _single_attack_distribution_from_hit_rolls(
             deadly=deadly,
             special_rules=special_rules,
             target_special_rules=target_special_rules,
+            combat_context=combat_context,
             hit_roll=roll,
             extra_hit_count=_extra_hit_count(special_rules, combat_context, hit_roll=roll),
         )
@@ -174,6 +176,7 @@ def _successful_hit_distribution(
     deadly: int,
     special_rules: dict[str, Any] | None,
     target_special_rules: dict[str, Any] | None,
+    combat_context: dict[str, Any] | None,
     hit_roll: int,
     extra_hit_count: int,
 ) -> list[float]:
@@ -183,6 +186,7 @@ def _successful_hit_distribution(
         deadly=deadly,
         special_rules=special_rules,
         target_special_rules=target_special_rules,
+        combat_context=combat_context,
         hit_roll=hit_roll,
     )
     extra_hit_distribution = _hit_wound_distribution(
@@ -191,6 +195,7 @@ def _successful_hit_distribution(
         deadly=deadly,
         special_rules=special_rules,
         target_special_rules=target_special_rules,
+        combat_context=combat_context,
         hit_roll=None,
     )
     return convolve(
@@ -205,6 +210,7 @@ def _hit_wound_distribution(
     deadly: int,
     special_rules: dict[str, Any] | None,
     target_special_rules: dict[str, Any] | None,
+    combat_context: dict[str, Any] | None,
     hit_roll: int | None,
 ) -> list[float]:
     if hit_roll == 6 and has_rule(special_rules, "Poison"):
@@ -219,6 +225,7 @@ def _hit_wound_distribution(
             defense=defense,
             special_rules=special_rules,
             hit_roll=hit_roll,
+            combat_context=combat_context,
         )
         wound_probability = p_fail_defense(defense, attack_ap) * _regeneration_multiplier(
             special_rules,
@@ -277,12 +284,15 @@ def _effective_attack_ap(
     defense: float,
     special_rules: dict[str, Any] | None,
     hit_roll: int | None,
+    combat_context: dict[str, Any] | None,
 ) -> float:
     bonus = 0
     if hit_roll == 6 and has_rule(special_rules, "Rending"):
         bonus = max(bonus, 4)
     if has_rule(special_rules, "Disintegrate") and int(defense) in (2, 3):
         bonus = max(bonus, 2)
+    if _slayer_applies(special_rules, combat_context):
+        bonus += 2
     return ap + bonus
 
 
@@ -329,6 +339,20 @@ def _thrust_applies(
         and _context_bool(combat_context, "charging")
         and _context_bool(combat_context, "is_melee")
     )
+
+
+def _slayer_applies(
+    special_rules: dict[str, Any] | None,
+    combat_context: dict[str, Any] | None,
+) -> bool:
+    if _context_int(combat_context, "target_tough", 1) < 3:
+        return False
+    is_melee = _context_bool(combat_context, "is_melee")
+    if has_rule(special_rules, "Melee Slayer"):
+        return is_melee and _context_bool(combat_context, "charging")
+    if has_rule(special_rules, "Ranged Slayer"):
+        return not is_melee
+    return False
 
 
 def _context_bool(combat_context: dict[str, Any] | None, name: str) -> bool:

@@ -81,17 +81,10 @@ class AdvisorApiTests(TestCase):
         self.assertEqual(payload["data"]["reconciliation_warnings"], [])
         self.assertIsNone(payload["data"]["army_list"])
         self.assertEqual(suggest_list.call_count, 2)
-        suggest_list.assert_has_calls(
-            [
-                call(self.faction.id, 2000, "Aggressive elite list."),
-                call(
-                    self.faction.id,
-                    2000,
-                    "Aggressive elite list.",
-                    correction_feedback="Spend closer to 2000 points; the prior legal total was 180.",
-                ),
-            ]
-        )
+        self.assertEqual(suggest_list.call_args_list[0], call(self.faction.id, 2000, "Aggressive elite list."))
+        feedback = suggest_list.call_args.kwargs["correction_feedback"]
+        self.assertIn("Spend closer to 2000 points; the prior legal total was 180.", feedback)
+        self.assertIn("List health metrics", feedback)
 
     def test_suggest_endpoint_rejects_missing_faction(self):
         response = self.client.post(
@@ -173,6 +166,53 @@ class AdvisorApiTests(TestCase):
         )
         self.assertEqual(payload["data"]["army_list"]["advisor_prompt"], "Aggressive elite list.")
         self.assertEqual(payload["data"]["computed_total_points"], 180)
+
+    @patch("advisor.views.suggest_list")
+    def test_suggest_endpoint_persists_combined_units(self, suggest_list):
+        shield_wall = Unit.objects.create(
+            faction=self.faction,
+            name="Shield Wall",
+            quality=4,
+            defense=5,
+            tough=1,
+            points=120,
+            min_models=5,
+            max_models=10,
+            default_models=5,
+        )
+        UnitWeaponSlot.objects.create(unit=shield_wall, weapon=self.weapon)
+        suggest_list.return_value = self.suggestion.model_copy(
+            update={
+                "units": [
+                    SuggestedUnit(
+                        unit_id=shield_wall.id,
+                        unit_name="Shield Wall",
+                        model_count=5,
+                        combined_from_count=2,
+                        justification="Combined center block.",
+                    )
+                ],
+                "total_points": 240,
+            }
+        )
+
+        response = self.client.post(
+            "/api/advisor/suggest/",
+            {
+                "faction": self.faction.id,
+                "point_limit": 750,
+                "prompt": "Durable center block.",
+                "dry_run": False,
+            },
+            format="json",
+        )
+
+        payload = response.json()
+        entry = ListUnit.objects.get(unit=shield_wall)
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(entry.combined_from_count, 2)
+        self.assertEqual(payload["data"]["army_list"]["units"][0]["combined_from_count"], 2)
+        self.assertEqual(payload["data"]["computed_total_points"], 240)
 
     @patch("advisor.views.suggest_list")
     def test_suggest_endpoint_creates_from_preview_payload_without_recalling_llm(self, suggest_list):
@@ -522,6 +562,73 @@ class AdvisorApiTests(TestCase):
         self.assertEqual(payload["data"]["suggestion"]["archetype"], "Objective Control")
         self.assertEqual(payload["data"]["suggestion"]["units"][0]["unit_name"], "Guardians")
 
+    @patch("advisor.views.suggest_list")
+    def test_suggest_endpoint_retries_once_for_actionable_metrics_feedback(self, suggest_list):
+        first_units = [
+            self._unit_with_default_weapon(f"Line Unit {index}", 150)
+            for index in range(1, 6)
+        ]
+        corrected_units = [
+            self._unit_with_default_weapon("Scouts", 150, {"Scout": True}),
+            self._unit_with_default_weapon("Flyers", 150, {"Flying": True}),
+            self._unit_with_default_weapon("Archers", 150, weapon_range=24),
+            self._unit_with_default_weapon("Slayers", 150, weapon_ap=3),
+            self._unit_with_default_weapon("Spears", 150),
+        ]
+        first = ListSuggestion(
+            units=[
+                SuggestedUnit(
+                    unit_id=unit.id,
+                    unit_name=unit.name,
+                    model_count=1,
+                    justification="Static line unit.",
+                )
+                for unit in first_units
+            ],
+            total_points=750,
+            archetype="Static Line",
+            playstyle="Stand and fight",
+            activation_count=5,
+            strategy_summary="Hold the center.",
+            warnings=["Low mobility."],
+        )
+        corrected = ListSuggestion(
+            units=[
+                SuggestedUnit(
+                    unit_id=unit.id,
+                    unit_name=unit.name,
+                    model_count=1,
+                    justification="Covers a needed role.",
+                )
+                for unit in corrected_units
+            ],
+            total_points=750,
+            archetype="Objective Control",
+            playstyle="Mobile Board Play",
+            activation_count=5,
+            strategy_summary="Use mobile units to contest objectives.",
+            warnings=[],
+        )
+        suggest_list.side_effect = [first, corrected]
+
+        response = self.client.post(
+            "/api/advisor/suggest/",
+            {
+                "faction": self.faction.id,
+                "point_limit": 750,
+                "prompt": "Make a mobile objective list.",
+            },
+            format="json",
+        )
+
+        payload = response.json()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(suggest_list.call_count, 2)
+        feedback = suggest_list.call_args.kwargs["correction_feedback"]
+        self.assertIn("List health metrics", feedback)
+        self.assertIn("mobility packages 0", feedback)
+        self.assertEqual(payload["data"]["suggestion"]["archetype"], "Objective Control")
+
     @override_settings(ADVISOR_RATE_LIMIT_REQUESTS=5, ADVISOR_RATE_LIMIT_WINDOW_SECONDS=60)
     @patch("advisor.views.suggest_list")
     def test_suggest_endpoint_rate_limits_expensive_requests(self, suggest_list):
@@ -553,7 +660,7 @@ class AdvisorApiTests(TestCase):
         self.assertEqual(response.status_code, 429)
         self.assertIn("Too many advisor requests", response.json()["error"])
 
-    def _unit_with_default_weapon(self, name, points, special_rules=None):
+    def _unit_with_default_weapon(self, name, points, special_rules=None, weapon_range=None, weapon_ap=None):
         unit = Unit.objects.create(
             faction=self.faction,
             name=name,
@@ -566,5 +673,14 @@ class AdvisorApiTests(TestCase):
             max_models=1,
             special_rules=special_rules or {},
         )
-        UnitWeaponSlot.objects.create(unit=unit, weapon=self.weapon, is_default=True)
+        weapon = self.weapon
+        if weapon_range is not None or weapon_ap is not None:
+            weapon = Weapon.objects.create(
+                name=f"{name} Weapon",
+                range=self.weapon.range if weapon_range is None else weapon_range,
+                attacks=self.weapon.attacks,
+                attacks_string=self.weapon.attacks_string,
+                ap=self.weapon.ap if weapon_ap is None else weapon_ap,
+            )
+        UnitWeaponSlot.objects.create(unit=unit, weapon=weapon, is_default=True)
         return unit

@@ -76,12 +76,18 @@ def reconcile_suggestion(
 
         model_count, count_warnings = _reconcile_model_count(unit, suggested.model_count)
         warnings.extend(count_warnings)
+        combined_from_count, combined_warnings = _reconcile_combined_count(
+            unit,
+            model_count,
+            suggested.combined_from_count,
+        )
+        warnings.extend(combined_warnings)
         selected_upgrade_ids, upgrade_warnings = _reconcile_selected_upgrades(
             unit,
             suggested.selected_upgrade_ids,
         )
         warnings.extend(upgrade_warnings)
-        unit_points = _unit_points(unit, model_count, selected_upgrade_ids)
+        unit_points = _unit_points(unit, model_count, selected_upgrade_ids, combined_from_count)
         if group_point_cap is not None and unit_points > group_point_cap:
             warnings.append(
                 f"{unit.name} was skipped because it exceeds the 35% force organization unit cap."
@@ -107,16 +113,17 @@ def reconcile_suggestion(
                 continue
             hero_count += 1
         unit_copy_count = unit_copies.get(unit.id, 0)
-        if max_copies is not None and unit_copy_count >= max_copies:
+        if max_copies is not None and unit_copy_count + combined_from_count > max_copies:
             warnings.append(
                 f"{unit.name} was skipped because force organization allows at most {max_copies} copies."
             )
             continue
-        unit_copies[unit.id] = unit_copy_count + 1
+        unit_copies[unit.id] = unit_copy_count + combined_from_count
         reconciled = suggested.model_copy(
             update={
                 "unit_name": unit.name,
                 "model_count": model_count,
+                "combined_from_count": combined_from_count,
                 "selected_upgrade_ids": selected_upgrade_ids,
                 "parent_unit_index": suggested.parent_unit_index,
             }
@@ -169,17 +176,36 @@ def _reconcile_model_count(unit: Unit, requested_count: int) -> tuple[int, list[
     return model_count, warnings
 
 
+def _reconcile_combined_count(
+    unit: Unit,
+    model_count: int,
+    requested_count: int,
+) -> tuple[int, list[str]]:
+    warnings: list[str] = []
+    combined_count = max(1, requested_count)
+    if combined_count > 1 and (model_count <= 1 or is_hero(unit)):
+        combined_count = 1
+        warnings.append(f"{unit.name} combined count was reduced to 1 because it cannot be combined.")
+    return combined_count, warnings
+
+
 def _unit_points(
     unit: Unit,
     model_count: int,
     selected_upgrade_ids: list[int] | None = None,
+    combined_from_count: int = 1,
 ) -> int:
     slot = _default_slot(list(unit.weapon_slots.all()))
     upgrade_options = _upgrade_options_by_id(unit, selected_upgrade_ids or [])
     upgrade_cost = sum(option.cost for option in upgrade_options)
     if not upgrade_options and slot:
         upgrade_cost = slot.upgrade_cost
-    return unit_selection_points(unit=unit, model_count=model_count, upgrade_cost=upgrade_cost)
+    return unit_selection_points(
+        unit=unit,
+        model_count=model_count,
+        upgrade_cost=upgrade_cost,
+        combined_count=combined_from_count,
+    )
 
 
 def _reconcile_selected_upgrades(unit: Unit, option_ids: list[int]) -> tuple[list[int], list[str]]:
@@ -279,8 +305,18 @@ def _parent_index_error(
     if is_hero(parent_unit) or parent.model_count <= 1:
         return f"{child.unit_name} ignored embedded host index {parent_index}; host must be a multi-model non-hero unit."
     if point_limit > 0:
-        group_points = _unit_points(parent_unit, parent.model_count, parent.selected_upgrade_ids)
-        group_points += _unit_points(child_unit, child.model_count, child.selected_upgrade_ids)
+        group_points = _unit_points(
+            parent_unit,
+            parent.model_count,
+            parent.selected_upgrade_ids,
+            parent.combined_from_count,
+        )
+        group_points += _unit_points(
+            child_unit,
+            child.model_count,
+            child.selected_upgrade_ids,
+            child.combined_from_count,
+        )
         if group_points > point_limit * 0.35:
             return f"{child.unit_name} ignored embedded host index {parent_index}; embedded group exceeds the 35% cap."
     return None
@@ -444,7 +480,12 @@ def _legal_repair_action(
         old_unit = unit_lookup.get(old.unit_id)
         if old_unit is None:
             return None
-        old_points = _unit_points(old_unit, old.model_count, old.selected_upgrade_ids)
+        old_points = _unit_points(
+            old_unit,
+            old.model_count,
+            old.selected_upgrade_ids,
+            old.combined_from_count,
+        )
         old_name = old_unit.name
         remaining_units = [
             suggested for index, suggested in enumerate(reconciled_units) if index != replace_index
@@ -454,7 +495,12 @@ def _legal_repair_action(
         old_unit = unit_lookup.get(old.unit_id)
         if old_unit is None:
             return None
-        old_points = _unit_points(old_unit, old.model_count, old.selected_upgrade_ids)
+        old_points = _unit_points(
+            old_unit,
+            old.model_count,
+            old.selected_upgrade_ids,
+            old.combined_from_count,
+        )
         remaining_units = [
             suggested for index, suggested in enumerate(reconciled_units) if index != resize_index
         ]
@@ -463,7 +509,12 @@ def _legal_repair_action(
         old_unit = unit_lookup.get(old.unit_id)
         if old_unit is None:
             return None
-        old_points = _unit_points(old_unit, old.model_count, old.selected_upgrade_ids)
+        old_points = _unit_points(
+            old_unit,
+            old.model_count,
+            old.selected_upgrade_ids,
+            old.combined_from_count,
+        )
         remaining_units = [
             suggested for index, suggested in enumerate(reconciled_units) if index != upgrade_index
         ]
@@ -536,7 +587,7 @@ def _can_include_unit(
             return False
         if is_hero(unit):
             hero_count += 1
-        copies[unit.id] = copies.get(unit.id, 0) + 1
+        copies[unit.id] = copies.get(unit.id, 0) + max(1, suggested.combined_from_count)
 
     if max_heroes is not None and is_hero(candidate) and hero_count >= max_heroes:
         return False

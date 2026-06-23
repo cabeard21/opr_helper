@@ -12,7 +12,7 @@ from lists.validation import list_unit_points
 DEFAULT_TARGETS = (
     {"id": "infantry", "name": "Infantry", "defense": 5, "tough": 1},
     {"id": "elite", "name": "Elite", "defense": 3, "tough": 3},
-    {"id": "monster", "name": "Monster", "defense": 2, "tough": 10},
+    {"id": "monster", "name": "Monster", "defense": 2, "tough": 10, "special_rules": {"Regeneration": True}},
 )
 
 
@@ -36,9 +36,22 @@ class TargetProfile:
         return result
 
 
+def default_target_profiles() -> list[TargetProfile]:
+    return [
+        TargetProfile(
+            id=str(raw["id"]),
+            name=str(raw["name"]),
+            defense=int(raw["defense"]),
+            tough=int(raw["tough"]),
+            special_rules=dict(raw.get("special_rules") or {}),
+        )
+        for raw in DEFAULT_TARGETS
+    ]
+
+
 def validate_targets(raw_targets: Any) -> tuple[list[TargetProfile], dict[str, str] | None]:
     if raw_targets in (None, []):
-        raw_targets = DEFAULT_TARGETS
+        return default_target_profiles(), None
     if not isinstance(raw_targets, list | tuple):
         return [], {"targets": "Targets must be a list."}
 
@@ -181,14 +194,17 @@ def defensive_wound_multiplier(special_rules: dict[str, Any] | None) -> float:
     return 1.0
 
 
-def weapon_combat_context(weapon: Any, model_count: int) -> dict[str, Any]:
+def weapon_combat_context(weapon: Any, model_count: int, target_tough: int | None = None) -> dict[str, Any]:
     is_melee = weapon.range == 0
-    return {
+    context = {
         "charging": is_melee,
         "is_melee": is_melee,
         "target_over_9": False,
         "attacking_models": model_count,
     }
+    if target_tough is not None:
+        context["target_tough"] = target_tough
+    return context
 
 
 def _target_result(
@@ -205,7 +221,7 @@ def _target_result(
     for weapon in weapons:
         attacks = weapon.attacks * entry.model_count
         special_rules = {**extra_rules, **weapon.special_rules}
-        combat_context = weapon_combat_context(weapon, entry.model_count)
+        combat_context = weapon_combat_context(weapon, entry.model_count, target.tough)
         weapon_ev = calculate_ev(
             attacks,
             entry.unit.quality,

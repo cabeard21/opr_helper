@@ -55,7 +55,7 @@ def build_system_prompt(game: str = "AoF") -> str:
         "Prefer lists with enough activation count: about 7 activations at 2000 points and at least 5 when possible. "
         "Prioritize mobility in AoF, especially Scout, Fast, Flying, Strider, and transports. "
         "Respect AP and Deadly needs; include credible AP threats for tough targets. "
-        "Fearless and morale support matter for contesting objectives. "
+        "Fearless is useful for units that need to maintain morale, keep activating, and contest objectives after taking losses. "
         "Never select packages marked over the 35% cap. "
         "Aim for units that can pressure roughly six wounds in an activation when the strategy requires killing. "
         "Cover composition roles when available: core scoring, mobility/objective play, anti-tough/AP, "

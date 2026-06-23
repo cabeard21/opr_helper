@@ -56,6 +56,8 @@ class ContextBuilderTests(SimpleTestCase):
 
         for term in ("activation", "AP", "mobility", "Scout", "Fearless", "25%", "archetype", "close to the point limit", "Caster"):
             self.assertIn(term, prompt)
+        self.assertIn("maintain morale", prompt)
+        self.assertIn("keep activating", prompt)
 
     def test_user_context_stays_bounded_for_typical_faction(self):
         unit_table = build_unit_table([profile(index) for index in range(1, 41)])

@@ -175,6 +175,67 @@ class SuggestionReconciliationTests(TestCase):
         self.assertEqual(result.computed_total_points, 65)
         self.assertNotIn("35% force organization unit cap", "\n".join(result.warnings))
 
+    def test_recomputes_combined_unit_points_and_copy_usage(self):
+        shield_wall = self._unit_with_default_weapon(
+            "Shield Wall",
+            120,
+            min_models=5,
+            max_models=10,
+            default_models=5,
+        )
+        suggestion = self._suggestion(
+            SuggestedUnit(
+                unit_id=shield_wall.id,
+                unit_name="Shield Wall",
+                model_count=5,
+                combined_from_count=2,
+                justification="Combined center block.",
+            ),
+            SuggestedUnit(
+                unit_id=shield_wall.id,
+                unit_name="Shield Wall",
+                model_count=5,
+                justification="Extra copy should exceed copy limit.",
+            ),
+        )
+
+        result = reconcile_suggestion(
+            faction=self.faction,
+            point_limit=750,
+            suggestion=suggestion,
+        )
+
+        self.assertEqual(result.suggestion.units[0].combined_from_count, 2)
+        self.assertEqual(result.computed_total_points, 240)
+        self.assertIn("Shield Wall was skipped because force organization allows at most 2 copies.", result.warnings)
+
+    def test_combined_unit_over_force_org_cap_is_skipped(self):
+        expensive_guard = self._unit_with_default_weapon(
+            "Expensive Guard",
+            140,
+            min_models=5,
+            max_models=10,
+            default_models=5,
+        )
+        suggestion = self._suggestion(
+            SuggestedUnit(
+                unit_id=expensive_guard.id,
+                unit_name="Expensive Guard",
+                model_count=5,
+                combined_from_count=2,
+                justification="Too large a block.",
+            )
+        )
+
+        result = reconcile_suggestion(
+            faction=self.faction,
+            point_limit=750,
+            suggestion=suggestion,
+        )
+
+        self.assertEqual(result.suggestion.units, [])
+        self.assertIn("Expensive Guard was skipped because it exceeds the 35% force organization unit cap.", result.warnings)
+
     def test_fixed_default_size_unit_with_upgrade_is_clamped_before_points(self):
         immortals = self._unit_with_default_weapon(
             name="Immortals",

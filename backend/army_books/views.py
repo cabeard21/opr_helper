@@ -98,6 +98,7 @@ def calculate_ev_view(request):
         **combat_context,
         "is_melee": weapon.range == 0,
         "attacking_models": 1,
+        "target_tough": target_tough,
     }
     ev = calculate_ev(
         weapon.attacks,

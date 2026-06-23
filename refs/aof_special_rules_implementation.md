@@ -34,7 +34,7 @@ Primary implementation seams:
 | Disintegrate | High | Ignores target Regeneration and applies AP(+2) against Defense 2+ or 3+ targets in EV/list/advisor scoring. Source note: present in current Army Forge data, but absent from the local AoF v3.5.1 print-friendly PDF. |
 | Fast | Partial | Advisor/list-health mobility signal; no movement simulation. |
 | Fear(X) | None | No melee-result modifier. |
-| Fearless | Partial | Advisor support/flag only; no morale reroll/pass mechanic. |
+| Fearless | Partial | Advisor morale/support signal for units that need to maintain morale, keep activating, and contest objectives after losses; no morale reroll/pass mechanic. |
 | Flying | Partial | Advisor/list-health mobility signal; no terrain/unit movement handling. |
 | Furious | Partial | Extra hit on natural 6 is modeled only when combat context is charging; full melee engagement flow is not modeled. |
 | Hero | Partial | Embedding legality/UI/advisor support implemented; morale and wound-allocation details are not. |
@@ -42,12 +42,14 @@ Primary implementation seams:
 | Impact(X) | Partial | Charge impact dice are modeled as AP0 hits when combat context is charging; fatigue and full movement/charge flow are not modeled. |
 | Indirect | Partial | Calc UI can apply a -1 hit modifier; no LOS/cover/after-moving context. |
 | Limited | None | No once-per-game tracking. |
+| Melee Slayer | Partial | Charging melee attacks get AP(+2) against Tough(3)+ targets in calculator, list analysis, and advisor scoring; no full charge/matchup simulator. |
 | Regeneration | High | Defender-side wound ignore modeled as `2/3` wound multiplier; durability scoring uses `1.5`; Bane/Rending bypass handled. |
 | Relentless | Partial | Extra hit on unmodified shooting 6s is modeled when combat context marks the target as over 9"; full range/line-of-sight flow is not modeled. |
 | Reliable | None | Stored, but attacks are not changed to Quality 2+. |
 | Rending | High | All Rending hits ignore Regeneration; natural 6 hits get exact AP(+4). |
 | Scout | Partial | Advisor/list-health mobility signal; no deployment behavior. |
 | Slow | None | No movement penalty. |
+| Ranged Slayer | High | Ranged attacks get AP(+2) against Tough(3)+ targets in calculator, list analysis, and advisor scoring. |
 | Stealth | Partial | Calc UI can apply -1 hit modifier; advisor support flag exists; no range/all-model targeting automation. |
 | Strider | Partial | Advisor/list-health mobility signal; no terrain rules. |
 | Surge | High | Extra hit on natural 6 is modeled; only the original hit counts as a natural 6 for other special rules. |
@@ -59,6 +61,6 @@ Primary implementation seams:
 Summary:
 
 - Strongest modeled rules: AP, Deadly, Disintegrate, Regeneration, Rending, Surge, Tough.
-- Partially modeled combat rules: Bane, Blast, Furious, Impact, Indirect, Relentless, Sergeant, Stealth, Thrust, Unstoppable.
-- Strategic/advisor-only signals: Ambush, Fast, Fearless, Flying, Scout, Strider, plus support tagging for Regeneration and Stealth.
+- Partially modeled combat rules: Bane, Blast, Furious, Impact, Indirect, Melee Slayer, Relentless, Sergeant, Stealth, Thrust, Unstoppable.
+- Strategic/advisor signals: Ambush, Fast, Fearless, Flying, Scout, Strider, plus support tagging for Regeneration and Stealth.
 - Mostly absent categories: movement/deployment simulation, morale, full spell resolution, terrain interaction, once-per-game tracking, individual model targeting, and charge-only context.

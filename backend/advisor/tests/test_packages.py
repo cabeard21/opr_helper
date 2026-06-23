@@ -33,7 +33,7 @@ class AdvisorPackageTests(TestCase):
         self.assertEqual(package.points, 120)
         self.assertEqual(package.ev_infantry, 5.0)
         self.assertEqual(package.ev_elite, 3.333333)
-        self.assertEqual(package.ev_monster, 2.5)
+        self.assertEqual(package.ev_monster, 1.666667)
         self.assertEqual(package.wounds_per_100pts_infantry, 4.166667)
         self.assertEqual(package.selected_upgrade_ids, [])
         self.assertIn("mobility", package.role_tags)
@@ -63,17 +63,50 @@ class AdvisorPackageTests(TestCase):
         self.assertEqual(upgrade_package.points, 200)
         self.assertIn("anti-tough", upgrade_package.role_tags)
 
+    def test_builds_legal_combined_packages_for_multi_model_units(self):
+        unit = self._unit(
+            name="Shield Wall",
+            points=120,
+            min_models=5,
+            max_models=10,
+            default_models=5,
+        )
+        single_model = self._unit(name="Lone Hunter", points=95)
+
+        packages = build_advisor_packages(self.faction.id, point_limit=750)
+
+        combined = next(candidate for candidate in packages if candidate.package_id == f"u{unit.id}-base-c2")
+        self.assertEqual(combined.combined_from_count, 2)
+        self.assertEqual(combined.model_count, 5)
+        self.assertEqual(combined.points, 240)
+        self.assertFalse(combined.exceeds_group_cap)
+        self.assertNotIn(f"u{single_model.id}-base-c2", [package.package_id for package in packages])
+
+    def test_combined_packages_respect_copy_limit_and_force_org_cap(self):
+        unit = self._unit(
+            name="Expensive Guard",
+            points=140,
+            min_models=5,
+            max_models=10,
+            default_models=5,
+        )
+
+        packages = build_advisor_packages(self.faction.id, point_limit=750)
+
+        self.assertNotIn(f"u{unit.id}-base-c2", [package.package_id for package in packages])
+        self.assertNotIn(f"u{unit.id}-base-c3", [package.package_id for package in packages])
+
     def test_package_table_renders_package_ids_constraints_and_roles(self):
         self._unit(name="Rangers", points=100, special_rules={"Fast": True})
 
         table = build_package_table(build_advisor_packages(self.faction.id, point_limit=750))
 
         self.assertIn(
-            "| Package | Unit | Pts | Models | Q | Def | T | AP | EV_inf | EV_eli | EV_mon | W100 | Upgrades | Roles | Caster | Spell Roles | Aura | Embed | Legal |",
+            "| Package | Unit | Pts | Models | Combined | Q | Def | T | AP | EV_inf | EV_eli | EV_mon | W100 | Upgrades | Roles | Caster | Spell Roles | Aura | Embed | Legal |",
             table,
         )
         self.assertIn("u", table)
-        self.assertIn("| 1.00 | 0.67 | 0.50 | 1.00 |", table)
+        self.assertIn("| 1.00 | 0.67 | 0.33 | 1.00 |", table)
         self.assertIn("mobility", table)
         self.assertIn("ok", table)
 
@@ -159,6 +192,93 @@ class AdvisorPackageTests(TestCase):
         self.assertEqual(package.ev_infantry, 0.666667)
         self.assertEqual(package.ev_elite, 0.666667)
         self.assertEqual(package.ev_monster, 0.5)
+        self.assertIn("anti-tough", package.role_tags)
+
+    def test_package_monster_ev_uses_regenerating_default_target(self):
+        unit = self._unit(name="Monster Hunters", points=100)
+
+        package = next(
+            candidate for candidate in build_advisor_packages(self.faction.id, point_limit=750)
+            if candidate.unit_id == unit.id
+        )
+
+        self.assertEqual(package.ev_monster, 0.333333)
+
+    def test_package_regeneration_bypass_rules_keep_full_monster_ev(self):
+        expected_ev = {
+            "Bane": 0.166667,
+            "Disintegrate": 0.5,
+            "Unstoppable": 0.166667,
+            "Rending": 0.388889,
+        }
+        for rule, expected in expected_ev.items():
+            with self.subTest(rule=rule):
+                weapon = Weapon.objects.create(
+                    name=f"{rule} Spear",
+                    range=0,
+                    attacks=2,
+                    attacks_string="A2",
+                    ap=0,
+                    special_rules={rule: True},
+                )
+                unit = self._unit(name=f"{rule} Hunters", points=100, weapon=weapon)
+
+                package = next(
+                    candidate for candidate in build_advisor_packages(self.faction.id, point_limit=750)
+                    if candidate.unit_id == unit.id
+                )
+
+                self.assertEqual(package.ev_monster, expected)
+
+    def test_package_offense_and_roles_value_melee_slayer_against_tough_targets(self):
+        slayer_weapon = Weapon.objects.create(
+            name="Monster Hunting Spear",
+            range=0,
+            attacks=2,
+            attacks_string="A2",
+            ap=0,
+        )
+        unit = self._unit(
+            name="Quest Knights",
+            points=100,
+            special_rules={"Melee Slayer": True, "Fearless": True},
+            weapon=slayer_weapon,
+        )
+
+        package = next(
+            candidate for candidate in build_advisor_packages(self.faction.id, point_limit=750)
+            if candidate.unit_id == unit.id
+        )
+
+        self.assertEqual(package.ev_infantry, 0.666667)
+        self.assertEqual(package.ev_elite, 0.666667)
+        self.assertEqual(package.ev_monster, 0.333333)
+        self.assertIn("anti-tough", package.role_tags)
+        self.assertIn("morale", package.role_tags)
+
+    def test_package_offense_and_roles_value_ranged_slayer_against_tough_targets(self):
+        slayer_weapon = Weapon.objects.create(
+            name="Monster Hunter Bow",
+            range=24,
+            attacks=2,
+            attacks_string="A2",
+            ap=0,
+        )
+        unit = self._unit(
+            name="Monster Hunters",
+            points=100,
+            special_rules={"Ranged Slayer": True},
+            weapon=slayer_weapon,
+        )
+
+        package = next(
+            candidate for candidate in build_advisor_packages(self.faction.id, point_limit=750)
+            if candidate.unit_id == unit.id
+        )
+
+        self.assertEqual(package.ev_infantry, 0.666667)
+        self.assertEqual(package.ev_elite, 0.666667)
+        self.assertEqual(package.ev_monster, 0.333333)
         self.assertIn("anti-tough", package.role_tags)
 
     def test_prompt_packages_are_bounded_and_legal_first(self):

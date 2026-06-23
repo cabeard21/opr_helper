@@ -224,6 +224,7 @@ function AdvisorPreview({
                 </div>
                 <p className="rounded border px-2 py-1 text-sm font-semibold" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-muted)' }}>
                   x{unit.model_count}
+                  {unit.combined_from_count > 1 ? `, combined x${unit.combined_from_count}` : ''}
                 </p>
               </div>
             </article>

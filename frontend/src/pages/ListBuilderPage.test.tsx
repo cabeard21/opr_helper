@@ -670,6 +670,7 @@ describe('ListBuilderPage', () => {
     expect(await screen.findByRole('heading', { name: /army analysis/i })).toBeInTheDocument()
     expect(apiClient.analyzeList).toHaveBeenCalledWith(1, expect.arrayContaining([
       expect.objectContaining({ id: 'infantry' }),
+      expect.objectContaining({ id: 'monster', special_rules: { Regeneration: true } }),
     ]))
     expect(screen.getAllByText('1.25 total EV').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Ranged 0.00 / Melee 1.25').length).toBeGreaterThan(0)

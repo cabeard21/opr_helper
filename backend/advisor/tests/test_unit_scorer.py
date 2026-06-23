@@ -42,6 +42,15 @@ class UnitScorerTests(TestCase):
         self.assertEqual(paladins.ev_elite, 2.666667)
         self.assertGreater(paladins.p_kill_infantry, 0)
 
+    def test_monster_ev_uses_regenerating_default_target(self):
+        self.weapon.special_rules = {}
+        self.weapon.ap = 2
+        self.weapon.save()
+
+        profile = next(profile for profile in score_faction_units(self.faction.id) if profile.unit_id == self.paladins.id)
+
+        self.assertEqual(profile.ev_monster, 0.444444)
+
     def test_units_without_weapon_slots_return_zero_offense(self):
         healer = Unit.objects.create(
             faction=self.faction,
@@ -164,3 +173,24 @@ class UnitScorerTests(TestCase):
         self.assertEqual(profile.ev_infantry, 0.666667)
         self.assertEqual(profile.ev_elite, 0.666667)
         self.assertEqual(profile.ev_monster, 0.5)
+
+    def test_regeneration_bypass_rules_keep_full_monster_ev(self):
+        expected_ev = {
+            "Bane": 0.166667,
+            "Disintegrate": 0.5,
+            "Unstoppable": 0.166667,
+            "Rending": 0.388889,
+        }
+        for rule, expected in expected_ev.items():
+            with self.subTest(rule=rule):
+                self.weapon.special_rules = {rule: True}
+                self.weapon.ap = 0
+                self.weapon.save()
+                self.paladins.quality = 4
+                self.paladins.save()
+
+                profile = next(
+                    profile for profile in score_faction_units(self.faction.id) if profile.unit_id == self.paladins.id
+                )
+
+                self.assertEqual(profile.ev_monster, expected)

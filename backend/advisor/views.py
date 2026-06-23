@@ -16,6 +16,7 @@ from advisor.llm_service import (
 )
 from advisor.rate_limit import advisor_rate_limit_exceeded
 from advisor.reconciliation import ReconciledSuggestion, reconcile_suggestion
+from advisor.suggestion_analysis import analyze_reconciled_suggestion, build_metrics_correction_feedback
 from army_books.models import Faction, Unit
 from lists.models import ArmyList, ListUnit, ListUnitUpgrade
 from lists.serializers import ArmyListSerializer
@@ -72,6 +73,7 @@ def suggest_army_list(request):
     )
     if payload["suggestion"] is None:
         correction_feedback = _advisor_correction_feedback(
+            faction=faction,
             reconciled=reconciled,
             point_limit=payload["point_limit"],
         )
@@ -196,6 +198,7 @@ def _response_data(
 
 def _advisor_correction_feedback(
     *,
+    faction: Faction,
     reconciled: ReconciledSuggestion,
     point_limit: int,
 ) -> str:
@@ -215,8 +218,6 @@ def _advisor_correction_feedback(
         )
     ]
     underfilled = point_limit > 0 and 0 < reconciled.computed_total_points < point_limit * 0.9
-    if not avoidable_warnings and not underfilled:
-        return ""
 
     feedback: list[str] = []
     if avoidable_warnings:
@@ -227,6 +228,15 @@ def _advisor_correction_feedback(
             f"Spend closer to {point_limit} points; the prior legal total was "
             f"{reconciled.computed_total_points}."
         )
+    metrics_feedback = build_metrics_correction_feedback(
+        analyze_reconciled_suggestion(
+            faction=faction,
+            point_limit=point_limit,
+            reconciled=reconciled,
+        )
+    )
+    if metrics_feedback:
+        feedback.append(metrics_feedback)
     return "\n".join(feedback)
 
 
@@ -282,6 +292,7 @@ def _create_army_list(
             army_list=army_list,
             unit=unit,
             model_count=suggested_unit.model_count,
+            combined_from_count=suggested_unit.combined_from_count,
             notes=suggested_unit.justification,
         )
         entry.selected_weapon_slot = selected_or_default_slot(entry)

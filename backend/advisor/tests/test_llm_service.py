@@ -97,12 +97,14 @@ class OpenAIAdvisorProviderTests(SimpleTestCase):
                     "unit_id": 1,
                     "unit_name": "Paladins",
                     "model_count": 1,
+                    "combined_from_count": 1,
                     "selected_upgrade_ids": [10],
                 },
                 "u2-base": {
                     "unit_id": 2,
                     "unit_name": "Champion",
                     "model_count": 1,
+                    "combined_from_count": 1,
                     "selected_upgrade_ids": [],
                 },
             },
@@ -110,10 +112,37 @@ class OpenAIAdvisorProviderTests(SimpleTestCase):
 
         self.assertEqual(result.units[0].unit_id, 1)
         self.assertEqual(result.units[0].selected_upgrade_ids, [10])
+        self.assertEqual(result.units[0].combined_from_count, 1)
         self.assertIsNone(result.units[0].parent_unit_index)
         self.assertEqual(result.units[1].unit_id, 2)
         self.assertEqual(result.units[1].parent_unit_index, 0)
         self.assertIn("Unknown package id missing was skipped.", result.warnings)
+
+    def test_package_suggestion_preserves_combined_count(self):
+        package_suggestion = PackageListSuggestion(
+            units=[PackageSuggestedUnit(package_id="u1-base-c2", justification="Forms a durable combined block.")],
+            total_points=240,
+            archetype="Board Control",
+            playstyle="Hold the center.",
+            activation_count=1,
+            strategy_summary="Use one large block to anchor objectives.",
+            warnings=[],
+        )
+
+        result = package_suggestion_to_list_suggestion(
+            package_suggestion,
+            {
+                "u1-base-c2": {
+                    "unit_id": 1,
+                    "unit_name": "Shield Wall",
+                    "model_count": 5,
+                    "combined_from_count": 2,
+                    "selected_upgrade_ids": [],
+                },
+            },
+        )
+
+        self.assertEqual(result.units[0].combined_from_count, 2)
 
     def test_raises_advisor_error_when_response_has_no_parsed_output(self):
         client = Mock()

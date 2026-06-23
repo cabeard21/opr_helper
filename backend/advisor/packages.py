@@ -5,7 +5,7 @@ from typing import Any
 
 from army_books.calc.engine import calculate_ev
 from army_books.models import FactionSpell, Unit, UnitUpgradeOption
-from lists.analysis import DEFAULT_TARGETS, TargetProfile, weapon_combat_context
+from lists.analysis import TargetProfile, default_target_profiles, weapon_combat_context
 from lists.loadouts import aura_rule_names_from_gains, split_aura_rules
 from lists.validation import (
     effective_max_models,
@@ -24,6 +24,7 @@ class AdvisorPackage:
     unit_id: int
     unit_name: str
     model_count: int
+    combined_from_count: int
     selected_upgrade_ids: list[int]
     upgrade_labels: list[str]
     points: int
@@ -53,8 +54,8 @@ def build_advisor_packages(faction_id: int, point_limit: int) -> list[AdvisorPac
     packages: list[AdvisorPackage] = []
     spell_role_tags = _faction_spell_role_tags(faction_id)
     for unit in units:
-        packages.append(
-            _package_for_unit(
+        packages.extend(
+            _packages_for_unit_variant(
                 unit=unit,
                 point_limit=point_limit,
                 spell_role_tags=spell_role_tags,
@@ -63,8 +64,8 @@ def build_advisor_packages(faction_id: int, point_limit: int) -> list[AdvisorPac
         for option in _upgrade_options(unit):
             if option.cost <= 0:
                 continue
-            packages.append(
-                _package_for_unit(
+            packages.extend(
+                _packages_for_unit_variant(
                     unit=unit,
                     point_limit=point_limit,
                     spell_role_tags=spell_role_tags,
@@ -79,18 +80,19 @@ def build_advisor_packages(faction_id: int, point_limit: int) -> list[AdvisorPac
 
 def build_package_table(packages: list[AdvisorPackage]) -> str:
     lines = [
-        "| Package | Unit | Pts | Models | Q | Def | T | AP | EV_inf | EV_eli | EV_mon | W100 | Upgrades | Roles | Caster | Spell Roles | Aura | Embed | Legal |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| Package | Unit | Pts | Models | Combined | Q | Def | T | AP | EV_inf | EV_eli | EV_mon | W100 | Upgrades | Roles | Caster | Spell Roles | Aura | Embed | Legal |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for package in packages:
         lines.append(
-            "| {package_id} | {unit} | {points} | {models} | {quality}+ | {defense}+ | "
+            "| {package_id} | {unit} | {points} | {models} | {combined} | {quality}+ | {defense}+ | "
             "{tough} | {ap} | {ev_inf:.2f} | {ev_eli:.2f} | {ev_mon:.2f} | {w100:.2f} | "
             "{upgrades} | {roles} | {caster} | {spell_roles} | {aura} | {embed} | {legal} |".format(
                 package_id=package.package_id,
                 unit=_compact(package.unit_name, 36),
                 points=package.points,
                 models=package.model_count,
+                combined=package.combined_from_count,
                 quality=package.quality,
                 defense=package.defense,
                 tough=package.tough,
@@ -126,7 +128,29 @@ def prompt_packages(
     ]
     candidates = legal or packages
     ranked = sorted(candidates, key=_prompt_package_sort_key)
-    return ranked[:max_rows]
+    visible = ranked[:max_rows]
+    if len(visible) < max_rows:
+        return visible
+
+    visible_ids = {package.package_id for package in visible}
+    combined_candidates = [
+        package
+        for package in ranked
+        if package.combined_from_count > 1 and package.package_id not in visible_ids
+    ]
+    if not combined_candidates:
+        return visible
+
+    combined_slots = max(1, max_rows // 6)
+    replacements = combined_candidates[:combined_slots]
+    replaceable_indexes = [
+        index
+        for index in range(len(visible) - 1, -1, -1)
+        if visible[index].combined_from_count == 1
+    ][: len(replacements)]
+    for index, replacement in zip(replaceable_indexes, replacements):
+        visible[index] = replacement
+    return sorted(visible, key=_prompt_package_sort_key)
 
 
 def package_lookup(packages: list[AdvisorPackage]) -> dict[str, dict[str, Any]]:
@@ -135,6 +159,7 @@ def package_lookup(packages: list[AdvisorPackage]) -> dict[str, dict[str, Any]]:
             "unit_id": package.unit_id,
             "unit_name": package.unit_name,
             "model_count": package.model_count,
+            "combined_from_count": package.combined_from_count,
             "selected_upgrade_ids": package.selected_upgrade_ids,
         }
         for package in packages
@@ -186,16 +211,23 @@ def _package_for_unit(
     upgrade_labels: list[str] | None = None,
     package_suffix: str = "base",
     upgrade_cost: int = 0,
+    combined_from_count: int = 1,
 ) -> AdvisorPackage:
     model_count = _default_model_count(unit)
-    points = unit_selection_points(unit=unit, model_count=model_count, upgrade_cost=upgrade_cost)
-    target_results = _target_scores(unit, model_count, points)
+    points = unit_selection_points(
+        unit=unit,
+        model_count=model_count,
+        upgrade_cost=upgrade_cost,
+        combined_count=combined_from_count,
+    )
+    target_results = _target_scores(unit, model_count, points, combined_from_count)
     caster_level = _caster_level(unit.special_rules)
     return AdvisorPackage(
-        package_id=f"u{unit.id}-{package_suffix}",
+        package_id=_package_id(unit.id, package_suffix, combined_from_count),
         unit_id=unit.id,
         unit_name=unit.name,
         model_count=model_count,
+        combined_from_count=combined_from_count,
         selected_upgrade_ids=selected_upgrade_ids or [],
         upgrade_labels=upgrade_labels or [],
         points=points,
@@ -217,6 +249,60 @@ def _package_for_unit(
     )
 
 
+def _packages_for_unit_variant(
+    *,
+    unit: Unit,
+    point_limit: int,
+    spell_role_tags: tuple[str, ...],
+    selected_upgrade_ids: list[int] | None = None,
+    upgrade_labels: list[str] | None = None,
+    package_suffix: str = "base",
+    upgrade_cost: int = 0,
+) -> list[AdvisorPackage]:
+    base_package = _package_for_unit(
+        unit=unit,
+        point_limit=point_limit,
+        spell_role_tags=spell_role_tags,
+        selected_upgrade_ids=selected_upgrade_ids,
+        upgrade_labels=upgrade_labels,
+        package_suffix=package_suffix,
+        upgrade_cost=upgrade_cost,
+    )
+    packages = [base_package]
+    if not _can_build_combined_packages(unit, base_package.model_count, point_limit):
+        return packages
+
+    copy_limit = force_org_copy_limit(point_limit) or 1
+    for combined_count in range(2, copy_limit + 1):
+        combined_package = _package_for_unit(
+            unit=unit,
+            point_limit=point_limit,
+            spell_role_tags=spell_role_tags,
+            selected_upgrade_ids=selected_upgrade_ids,
+            upgrade_labels=upgrade_labels,
+            package_suffix=package_suffix,
+            upgrade_cost=upgrade_cost,
+            combined_from_count=combined_count,
+        )
+        if combined_package.exceeds_group_cap:
+            continue
+        if point_limit > 0 and combined_package.points > point_limit:
+            continue
+        packages.append(combined_package)
+    return packages
+
+
+def _can_build_combined_packages(unit: Unit, model_count: int, point_limit: int) -> bool:
+    return point_limit > 0 and model_count > 1 and not is_hero(unit)
+
+
+def _package_id(unit_id: int, package_suffix: str, combined_from_count: int) -> str:
+    base_id = f"u{unit_id}-{package_suffix}"
+    if combined_from_count <= 1:
+        return base_id
+    return f"{base_id}-c{combined_from_count}"
+
+
 def _upgrade_options(unit: Unit) -> list[UnitUpgradeOption]:
     options: list[UnitUpgradeOption] = []
     for section in unit.upgrade_sections.all():
@@ -233,29 +319,32 @@ def _max_ap(unit: Unit) -> int:
     return max((slot.weapon.ap for slot in unit.weapon_slots.all() if slot.is_default), default=0)
 
 
-def _target_scores(unit: Unit, model_count: int, points: int) -> dict[str, dict[str, float]]:
-    targets = [
-        TargetProfile(
-            id=str(raw["id"]),
-            name=str(raw["name"]),
-            defense=int(raw["defense"]),
-            tough=int(raw["tough"]),
-        )
-        for raw in DEFAULT_TARGETS
-    ]
+def _target_scores(
+    unit: Unit,
+    model_count: int,
+    points: int,
+    combined_from_count: int = 1,
+) -> dict[str, dict[str, float]]:
+    targets = default_target_profiles()
     return {
-        target.id: _target_score(unit, model_count, points, target)
+        target.id: _target_score(unit, model_count, points, target, combined_from_count)
         for target in targets
     }
 
 
-def _target_score(unit: Unit, model_count: int, points: int, target: TargetProfile) -> dict[str, float]:
+def _target_score(
+    unit: Unit,
+    model_count: int,
+    points: int,
+    target: TargetProfile,
+    combined_from_count: int = 1,
+) -> dict[str, float]:
     ev = 0.0
     for slot in unit.weapon_slots.all():
         if not slot.is_default:
             continue
         weapon = slot.weapon
-        attacks = weapon.attacks * model_count
+        attacks = weapon.attacks * model_count * max(1, combined_from_count)
         special_rules = {**unit.special_rules, **weapon.special_rules}
         ev += calculate_ev(
             attacks,
@@ -263,7 +352,8 @@ def _target_score(unit: Unit, model_count: int, points: int, target: TargetProfi
             target.defense,
             weapon.ap,
             special_rules,
-            combat_context=weapon_combat_context(weapon, model_count),
+            target_special_rules=target.special_rules,
+            combat_context=weapon_combat_context(weapon, model_count, target.tough),
         )
     return {
         "ev": round(ev, 6),
@@ -277,12 +367,19 @@ def _role_tags(unit: Unit, points: int, point_limit: int, caster_level: str = ""
         tags.append("mobility")
     if any(slot.is_default and slot.weapon.range > 0 for slot in unit.weapon_slots.all()):
         tags.append("ranged")
-    if _max_ap(unit) >= 2 or unit.tough >= 3 or _has_disintegrate_weapon(unit):
+    if (
+        _max_ap(unit) >= 2
+        or unit.tough >= 3
+        or _has_disintegrate_weapon(unit)
+        or _has_any_rule(unit, ("Melee Slayer", "Ranged Slayer"))
+    ):
         tags.append("anti-tough")
     if point_limit > 0 and points <= point_limit * 0.12:
         tags.append("screen")
     if _has_any_rule(unit, ("Fearless", "Stealth", "Regeneration")):
         tags.append("support")
+    if _has_any_rule(unit, ("Fearless",)):
+        tags.append("morale")
     if caster_level:
         tags.extend(("caster", "support"))
     return tuple(dict.fromkeys(tags))

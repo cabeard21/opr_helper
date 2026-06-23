@@ -9,7 +9,7 @@ import { UnitCard } from '../components/UnitCard'
 const TARGET_PROFILES: TargetProfile[] = [
   { id: 'infantry', name: 'Infantry', defense: 5, tough: 1 },
   { id: 'elite', name: 'Elite', defense: 3, tough: 3 },
-  { id: 'monster', name: 'Monster', defense: 2, tough: 10 },
+  { id: 'monster', name: 'Monster', defense: 2, tough: 10, special_rules: { Regeneration: true } },
 ]
 
 const EMPTY_UNITS: Unit[] = []

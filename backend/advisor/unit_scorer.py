@@ -5,7 +5,7 @@ from typing import Any
 
 from army_books.calc.engine import calculate_distribution, calculate_ev
 from army_books.models import Unit, UnitWeaponSlot
-from lists.analysis import DEFAULT_TARGETS, TargetProfile, defensive_wound_multiplier, weapon_combat_context
+from lists.analysis import TargetProfile, default_target_profiles, defensive_wound_multiplier, weapon_combat_context
 from lists.validation import unit_selection_points
 
 
@@ -44,15 +44,7 @@ def score_faction_units(faction_id: int) -> list[UnitProfile]:
         .prefetch_related("weapon_slots__weapon", "upgrade_sections__options")
         .order_by("name", "id")
     )
-    targets = [
-        TargetProfile(
-            id=str(raw["id"]),
-            name=str(raw["name"]),
-            defense=int(raw["defense"]),
-            tough=int(raw["tough"]),
-        )
-        for raw in DEFAULT_TARGETS
-    ]
+    targets = default_target_profiles()
     return [_score_unit(unit, targets) for unit in units]
 
 
@@ -130,13 +122,14 @@ def _target_score(
         weapon = slot.weapon
         attacks = weapon.attacks * unit.default_models
         special_rules = {**unit.special_rules, **weapon.special_rules}
-        combat_context = weapon_combat_context(weapon, unit.default_models)
+        combat_context = weapon_combat_context(weapon, unit.default_models, target.tough)
         ev += calculate_ev(
             attacks,
             unit.quality,
             target.defense,
             weapon.ap,
             special_rules,
+            target_special_rules=target.special_rules,
             combat_context=combat_context,
         )
         distribution = calculate_distribution(
@@ -145,6 +138,7 @@ def _target_score(
             target.defense,
             weapon.ap,
             special_rules,
+            target_special_rules=target.special_rules,
             combat_context=combat_context,
         )
         p_kill_model += sum(

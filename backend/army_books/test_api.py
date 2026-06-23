@@ -114,6 +114,29 @@ class ArmyBooksApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["data"]["ev"], 1.944444)
 
+    def test_calc_endpoint_uses_target_tough_for_melee_slayer(self):
+        self.weapon.special_rules = {}
+        self.weapon.ap = 0
+        self.weapon.save()
+        self.unit.quality = 4
+        self.unit.special_rules = {"Melee Slayer": True}
+        self.unit.save()
+
+        response = self.client.post(
+            "/api/calc/ev/",
+            {
+                "unit_id": self.unit.id,
+                "weapon_id": self.weapon.id,
+                "target": {"defense": 4, "tough": 3},
+                "combat_context": {"charging": True},
+            },
+            format="json",
+        )
+
+        payload = response.json()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["data"]["ev"], 0.833333)
+
     def test_calc_endpoint_validates_missing_records(self):
         response = self.client.post(
             "/api/calc/ev/",

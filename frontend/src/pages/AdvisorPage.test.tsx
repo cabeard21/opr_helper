@@ -48,7 +48,8 @@ const previewResponse: AdvisorSuggestionResponse = {
       {
         unit_id: 10,
         unit_name: 'Paladins',
-        model_count: 1,
+        model_count: 5,
+        combined_from_count: 2,
         selected_upgrade_ids: [],
         parent_unit_index: null,
         justification: 'Durable high-AP center pressure.',
@@ -57,6 +58,7 @@ const previewResponse: AdvisorSuggestionResponse = {
         unit_id: 11,
         unit_name: 'Champion',
         model_count: 1,
+        combined_from_count: 1,
         selected_upgrade_ids: [],
         parent_unit_index: 0,
         justification: 'Embedded aura support.',
@@ -107,6 +109,7 @@ describe('AdvisorPage', () => {
     expect(screen.getByText('Shove It In')).toBeInTheDocument()
     expect(screen.getByText('180 / 2,000 pts')).toBeInTheDocument()
     expect(screen.getByText('Paladins')).toBeInTheDocument()
+    expect(screen.getByText('x5, combined x2')).toBeInTheDocument()
     expect(screen.getByText(/Durable high-AP/)).toBeInTheDocument()
     expect(screen.getByText('Champion')).toBeInTheDocument()
     expect(screen.getByText(/Embedded in Paladins/)).toBeInTheDocument()

@@ -194,6 +194,7 @@ export type SuggestedUnit = {
   unit_id: number
   unit_name: string
   model_count: number
+  combined_from_count: number
   selected_upgrade_ids: number[]
   parent_unit_index?: number | null
   justification: string
@@ -252,6 +253,7 @@ export type TargetProfile = {
   name: string
   defense: number
   tough: number
+  special_rules?: Record<string, unknown>
 }
 
 export type UnitTargetResult = {

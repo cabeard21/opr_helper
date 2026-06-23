@@ -997,6 +997,30 @@ class ListsApiTests(TestCase):
         self.assertEqual(response.json()["data"]["totals"][0]["ranged_ev"], 1.0)
         self.assertEqual(response.json()["data"]["totals"][0]["melee_ev"], 0.5)
 
+    def test_analyze_list_default_monster_target_has_regeneration(self):
+        army_list = ArmyList.objects.create(
+            name="Tournament 2000",
+            faction=self.faction,
+            point_limit=2000,
+        )
+        ListUnit.objects.create(
+            army_list=army_list,
+            unit=self.unit,
+            model_count=1,
+            selected_weapon_slot=self.slot,
+        )
+
+        response = self.client.post(f"/api/lists/{army_list.id}/analysis/", {"targets": []}, format="json")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()["data"]
+        monster_target = next(target for target in payload["targets"] if target["id"] == "monster")
+        self.assertEqual(monster_target["special_rules"], {"Regeneration": True})
+        monster_result = next(
+            result for result in payload["units"][0]["target_results"] if result["target_id"] == "monster"
+        )
+        self.assertEqual(monster_result["ev"], 0.444444)
+
     def test_analyze_list_uses_charge_context_for_melee_only(self):
         melee_weapon = Weapon.objects.create(
             name="Furious Claws",
@@ -1050,6 +1074,73 @@ class ListsApiTests(TestCase):
         results = {unit["unit_name"]: unit["target_results"][0] for unit in response.json()["data"]["units"]}
         self.assertEqual(results["Charging Claws"]["ev"], 2.5)
         self.assertEqual(results["Furious Archers"]["ev"], 2.0)
+
+    def test_analyze_list_applies_slayer_against_tough_targets_by_attack_type(self):
+        melee_weapon = Weapon.objects.create(
+            name="Monster Hunting Spear",
+            range=0,
+            attacks=2,
+            attacks_string="A2",
+            ap=0,
+        )
+        ranged_weapon = Weapon.objects.create(
+            name="Monster Hunter Bow",
+            range=24,
+            attacks=2,
+            attacks_string="A2",
+            ap=0,
+        )
+        melee_unit = Unit.objects.create(
+            faction=self.faction,
+            name="Quest Knights",
+            quality=4,
+            defense=4,
+            tough=1,
+            points=100,
+            special_rules={"Melee Slayer": True},
+        )
+        ranged_unit = Unit.objects.create(
+            faction=self.faction,
+            name="Monster Hunters",
+            quality=4,
+            defense=5,
+            tough=1,
+            points=100,
+            special_rules={"Ranged Slayer": True},
+        )
+        melee_slot = UnitWeaponSlot.objects.create(unit=melee_unit, weapon=melee_weapon, is_default=True)
+        ranged_slot = UnitWeaponSlot.objects.create(unit=ranged_unit, weapon=ranged_weapon, is_default=True)
+        army_list = ArmyList.objects.create(
+            name="Tournament 2000",
+            faction=self.faction,
+            point_limit=2000,
+        )
+        ListUnit.objects.create(army_list=army_list, unit=melee_unit, model_count=1, selected_weapon_slot=melee_slot)
+        ListUnit.objects.create(army_list=army_list, unit=ranged_unit, model_count=1, selected_weapon_slot=ranged_slot)
+
+        response = self.client.post(
+            f"/api/lists/{army_list.id}/analysis/",
+            {
+                "targets": [
+                    {"id": "infantry", "name": "Infantry", "defense": 5, "tough": 1},
+                    {"id": "elite", "name": "Elite", "defense": 3, "tough": 3},
+                ]
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        results = {
+            unit["unit_name"]: {
+                target["target_id"]: target
+                for target in unit["target_results"]
+            }
+            for unit in response.json()["data"]["units"]
+        }
+        self.assertEqual(results["Quest Knights"]["infantry"]["melee_ev"], 0.666667)
+        self.assertEqual(results["Quest Knights"]["elite"]["melee_ev"], 0.666667)
+        self.assertEqual(results["Monster Hunters"]["infantry"]["ranged_ev"], 0.666667)
+        self.assertEqual(results["Monster Hunters"]["elite"]["ranged_ev"], 0.666667)
 
     def test_analyze_missing_list_returns_error_envelope(self):
         response = self.client.post(

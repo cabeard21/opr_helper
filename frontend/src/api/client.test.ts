@@ -21,6 +21,20 @@ afterEach(() => {
 })
 
 describe('apiClient', () => {
+  it('uses the frontend origin API path by default', async () => {
+    vi.mocked(axios.create).mockReturnValue({ get: getRequest } as never)
+    getRequest.mockResolvedValue({ data: { data: [], error: null } })
+
+    await apiClient.getFactions()
+
+    expect(axios.create).toHaveBeenCalledWith({
+      baseURL: '/api',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    })
+  })
+
   it('unwraps successful API envelopes', async () => {
     vi.mocked(axios.create).mockReturnValue({ get: getRequest } as never)
     getRequest.mockResolvedValue({ data: { data: [{ id: 1, name: 'Kingdom' }], error: null } })

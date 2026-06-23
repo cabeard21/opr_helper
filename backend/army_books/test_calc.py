@@ -218,6 +218,68 @@ def test_thrust_applies_only_on_charging_melee():
     assert melee_charge == pytest.approx(6 * (4 / 6) * (4 / 6))
 
 
+def test_melee_slayer_adds_ap_against_tough_targets_only_on_charge():
+    baseline = calculate_ev(
+        6,
+        4,
+        4,
+        0,
+        {"Melee Slayer": True},
+        combat_context={"charging": True, "is_melee": True, "target_tough": 1},
+    )
+    not_charging = calculate_ev(
+        6,
+        4,
+        4,
+        0,
+        {"Melee Slayer": True},
+        combat_context={"charging": False, "is_melee": True, "target_tough": 3},
+    )
+    charging_tough_target = calculate_ev(
+        6,
+        4,
+        4,
+        0,
+        {"Melee Slayer": True},
+        combat_context={"charging": True, "is_melee": True, "target_tough": 3},
+    )
+
+    assert baseline == pytest.approx(6 * 0.5 * 0.5)
+    assert not_charging == pytest.approx(baseline)
+    assert charging_tough_target == pytest.approx(6 * 0.5 * (5 / 6))
+
+
+def test_ranged_slayer_adds_ap_against_tough_targets_only_when_shooting():
+    baseline = calculate_ev(
+        6,
+        4,
+        4,
+        0,
+        {"Ranged Slayer": True},
+        combat_context={"is_melee": False, "target_tough": 1},
+    )
+    melee_attack = calculate_ev(
+        6,
+        4,
+        4,
+        0,
+        {"Ranged Slayer": True},
+        combat_context={"charging": True, "is_melee": True, "target_tough": 3},
+    )
+    shooting_tough_target = calculate_ev(
+        6,
+        4,
+        4,
+        0,
+        {"Ranged Slayer": True},
+        combat_context={"is_melee": False, "target_tough": 3},
+    )
+
+    assert baseline == pytest.approx(6 * 0.5 * 0.5)
+    assert melee_attack == pytest.approx(baseline)
+    assert shooting_tough_target == pytest.approx(6 * 0.5 * (5 / 6))
+
+
 def test_impact_adds_charge_hits_without_weapon_specials():
     ev = calculate_ev(
         0,

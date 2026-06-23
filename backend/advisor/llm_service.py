@@ -28,6 +28,11 @@ class SuggestedUnit(BaseModel):
     unit_id: int = Field(gt=0, description="Database id of the selected unit.")
     unit_name: str = Field(description="Human-readable unit name.")
     model_count: int = Field(gt=0, description="Number of models to include.")
+    combined_from_count: int = Field(
+        default=1,
+        ge=1,
+        description="Number of same-unit copies combined into this effective unit.",
+    )
     selected_upgrade_ids: list[int] = Field(
         default_factory=list,
         description="Local database ids of selected native upgrade options.",
@@ -211,6 +216,7 @@ def package_suggestion_to_list_suggestion(
                 unit_id=int(package["unit_id"]),
                 unit_name=str(package["unit_name"]),
                 model_count=int(package["model_count"]),
+                combined_from_count=int(package.get("combined_from_count", 1)),
                 selected_upgrade_ids=list(package["selected_upgrade_ids"]),
                 parent_unit_index=parent_unit_index,
                 justification=selected.justification,

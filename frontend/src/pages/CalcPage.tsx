@@ -19,12 +19,13 @@ type TargetPreset = {
   name: string
   defense: number
   tough: number
+  special_rules?: Record<string, unknown>
 }
 
 const TARGET_PRESETS: TargetPreset[] = [
   { id: 'light', name: 'Light Infantry', defense: 5, tough: 1 },
   { id: 'heavy', name: 'Heavy Infantry', defense: 3, tough: 3 },
-  { id: 'monster', name: 'Monster', defense: 2, tough: 10 },
+  { id: 'monster', name: 'Monster', defense: 2, tough: 10, special_rules: { Regeneration: true } },
   { id: 'custom', name: 'Custom', defense: 4, tough: 1 },
 ]
 
@@ -108,7 +109,11 @@ export function CalcPage() {
   const target =
     targetPreset.id === 'custom'
       ? { defense: customDefense, tough: customTough }
-      : { defense: targetPreset.defense, tough: targetPreset.tough }
+      : {
+          defense: targetPreset.defense,
+          tough: targetPreset.tough,
+          ...(targetPreset.special_rules ? { special_rules: targetPreset.special_rules } : {}),
+        }
 
   async function calculate() {
     if (!selectedUnit || !selectedWeapon) {

@@ -160,4 +160,27 @@ describe('CalcPage', () => {
       )
     })
   })
+
+  it('sends regeneration for the built-in monster target', async () => {
+    const user = userEvent.setup()
+    vi.mocked(apiClient.getFactions).mockResolvedValue(factions)
+    vi.mocked(apiClient.getFactionUnits).mockResolvedValue([paladins])
+    vi.mocked(apiClient.calculateEv).mockResolvedValue(calcResult)
+
+    renderCalcPage()
+
+    await user.selectOptions(await screen.findByLabelText(/faction/i), '1')
+    await user.selectOptions(await screen.findByLabelText(/unit/i), '10')
+    await user.selectOptions(await screen.findByLabelText(/weapon/i), '30')
+    await user.selectOptions(screen.getByLabelText(/profile/i), 'monster')
+    await user.click(screen.getByRole('button', { name: /calculate/i }))
+
+    await waitFor(() => {
+      expect(apiClient.calculateEv).toHaveBeenCalledWith(
+        expect.objectContaining({
+          target: { defense: 2, tough: 10, special_rules: { Regeneration: true } },
+        }),
+      )
+    })
+  })
 })
