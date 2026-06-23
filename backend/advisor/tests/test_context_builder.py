@@ -3,7 +3,13 @@ from tempfile import TemporaryDirectory
 
 from django.test import SimpleTestCase, override_settings
 
-from advisor.context_builder import build_reference_material, build_system_prompt, build_unit_table, build_user_context
+from advisor.context_builder import (
+    build_reference_material,
+    build_spell_table,
+    build_system_prompt,
+    build_unit_table,
+    build_user_context,
+)
 from advisor.unit_scorer import UnitProfile
 
 
@@ -48,22 +54,50 @@ class ContextBuilderTests(SimpleTestCase):
     def test_system_prompt_contains_core_doctrine_terms(self):
         prompt = build_system_prompt(game="AoF")
 
-        for term in ("activation", "AP", "mobility", "Scout", "Fearless", "25%", "archetype", "close to the point limit"):
+        for term in ("activation", "AP", "mobility", "Scout", "Fearless", "25%", "archetype", "close to the point limit", "Caster"):
             self.assertIn(term, prompt)
 
     def test_user_context_stays_bounded_for_typical_faction(self):
         unit_table = build_unit_table([profile(index) for index in range(1, 41)])
+        spell_table = build_spell_table(
+            [
+                {
+                    "name": "Healing Swarm",
+                    "threshold": 2,
+                    "effect": 'Pick one friendly unit within 12", which removes D3 wounds.',
+                    "role_tags": ("healing",),
+                }
+            ]
+        )
 
         context = build_user_context(
             faction_name="Kingdom of Angels",
             point_limit=2000,
             unit_table=unit_table,
+            spell_table=spell_table,
             user_prompt="Build an aggressive mobile list.",
         )
 
         self.assertLess(len(context), 6000)
         self.assertIn("Kingdom of Angels", context)
+        self.assertIn("Faction spells:", context)
+        self.assertIn("Healing Swarm", context)
         self.assertIn("Build an aggressive mobile list.", context)
+
+    def test_spell_table_renders_compact_spell_context(self):
+        table = build_spell_table(
+            [
+                {
+                    "name": "Poison Mist",
+                    "threshold": 1,
+                    "effect": 'Pick one enemy unit within 18", which friendly units gets Shred when attacking.',
+                    "role_tags": ("damage", "buff"),
+                }
+            ]
+        )
+
+        self.assertIn("| Spell | Cast | Roles | Effect |", table)
+        self.assertIn("| Poison Mist | 1 | damage, buff | Pick one enemy unit within 18", table)
 
     def test_reference_material_loads_markdown_in_deterministic_order(self):
         with TemporaryDirectory() as directory:

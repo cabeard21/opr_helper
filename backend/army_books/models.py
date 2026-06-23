@@ -15,6 +15,33 @@ class Faction(models.Model):
         return self.name
 
 
+class FactionSpell(models.Model):
+    faction = models.ForeignKey(
+        Faction,
+        on_delete=models.CASCADE,
+        related_name="spells",
+    )
+    source_uid = models.CharField(max_length=120, db_index=True)
+    name = models.CharField(max_length=160)
+    threshold = models.PositiveSmallIntegerField(default=1)
+    effect = models.TextField(blank=True)
+    spellbook_id = models.CharField(max_length=120, blank=True)
+    spell_type = models.IntegerField(null=True, blank=True)
+    raw_data = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ("threshold", "name", "id")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("faction", "source_uid"),
+                name="unique_faction_spell",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.faction}: {self.name}"
+
+
 class Unit(models.Model):
     faction = models.ForeignKey(
         Faction,

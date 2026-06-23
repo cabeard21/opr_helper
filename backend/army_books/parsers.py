@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 import re
 from typing import Any
 
@@ -122,6 +123,18 @@ def parse_weapon(raw: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def parse_spell(raw: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "source_uid": str(_first(raw, "source_uid", "uid", "id")),
+        "name": str(raw["name"]),
+        "threshold": parse_stat_target(_first(raw, "threshold", "cost", "value", default=1)),
+        "effect": str(raw.get("effect") or ""),
+        "spellbook_id": str(raw.get("spellbookId") or raw.get("spellbook_id") or ""),
+        "spell_type": _optional_int(raw.get("type")),
+        "raw_data": deepcopy(raw),
+    }
+
+
 def _parse_unit_tough(raw: dict[str, Any], special_rules: dict[str, Any]) -> int:
     if "tough" in raw and raw["tough"] is not None:
         return parse_stat_target(raw["tough"])
@@ -167,6 +180,15 @@ def _optional_positive_int(value: Any) -> int | None:
         return None
     parsed = parse_stat_target(value)
     return parsed if parsed > 0 else None
+
+
+def _optional_int(value: Any) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _parse_weapon_ap(raw: dict[str, Any], raw_rules: Any) -> int:

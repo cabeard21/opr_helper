@@ -99,6 +99,38 @@ def test_bane_ignores_target_regeneration():
     assert ev == pytest.approx(6 * 0.5 * 0.5)
 
 
+def test_disintegrate_ignores_target_regeneration_and_adds_ap_against_elite_defense():
+    ev = calculate_ev(
+        6,
+        4,
+        3,
+        0,
+        {"Disintegrate": True},
+        target_special_rules={"Regeneration": True},
+    )
+
+    assert ev == pytest.approx(6 * 0.5 * (4 / 6))
+
+
+def test_disintegrate_ap_bonus_applies_only_against_defense_two_or_three():
+    assert calculate_ev(6, 4, 2, 0, {"Disintegrate": True}) == pytest.approx(6 * 0.5 * 0.5)
+    assert calculate_ev(6, 4, 3, 0, {"Disintegrate": True}) == pytest.approx(6 * 0.5 * (4 / 6))
+    assert calculate_ev(6, 4, 4, 0, {"Disintegrate": True}) == pytest.approx(6 * 0.5 * 0.5)
+
+
+def test_disintegrate_composes_with_rending_without_double_counting_natural_six_ap():
+    ev = calculate_ev(6, 4, 3, 0, {"Disintegrate": True, "Rending": True})
+
+    expected_per_attack = (1 / 6) + (2 / 6) * (4 / 6)
+    assert ev == pytest.approx(6 * expected_per_attack)
+
+
+def test_disintegrate_ap_bonus_applies_to_blast():
+    ev = calculate_ev(6, 4, 3, 0, {"Blast": 3, "Disintegrate": True})
+
+    assert ev == pytest.approx(3 * (4 / 6))
+
+
 def test_rending_ignores_regeneration_on_all_hits_and_adds_ap_on_natural_six():
     ev = calculate_ev(
         6,

@@ -6,9 +6,18 @@ from django.conf import settings
 from openai import OpenAI, OpenAIError
 from pydantic import BaseModel, Field, ValidationError
 
-from advisor.context_builder import build_system_prompt, build_user_context
-from advisor.packages import build_advisor_packages, build_package_table, force_org_summary, package_lookup
-from army_books.models import Faction
+from advisor.context_builder import build_spell_table, build_system_prompt, build_user_context
+from advisor.packages import (
+    build_advisor_packages,
+    build_package_table,
+    force_org_summary,
+    package_lookup,
+    prompt_packages,
+    spell_role_tags,
+)
+from army_books.models import Faction, FactionSpell
+
+ADVISOR_MAX_OUTPUT_TOKENS = 4096
 
 
 class AdvisorLLMError(Exception):
@@ -92,10 +101,12 @@ class OpenAIAdvisorProvider:
                 instructions=system_prompt,
                 input=user_context,
                 text_format=text_format,
-                max_output_tokens=2048,
+                max_output_tokens=ADVISOR_MAX_OUTPUT_TOKENS,
             )
         except OpenAIError as exc:
             raise AdvisorLLMError("OpenAI provider request failed.") from exc
+        except ValidationError as exc:
+            raise AdvisorLLMError("LLM response did not match the structured suggestion schema.") from exc
 
         parsed = getattr(response, "output_parsed", None)
         if parsed is None:
@@ -131,12 +142,19 @@ def suggest_list(
 ) -> ListSuggestion:
     faction = Faction.objects.get(id=faction_id)
     packages = build_advisor_packages(faction_id, point_limit)
-    package_table = build_package_table(packages)
+    visible_packages = prompt_packages(
+        packages,
+        point_limit=point_limit,
+        max_rows=int(getattr(settings, "ADVISOR_PACKAGE_TABLE_MAX_ROWS", 60)),
+    )
+    package_table = build_package_table(visible_packages)
+    spell_table = build_spell_table(_faction_spells(faction_id))
     system_prompt = build_system_prompt(game="AoF")
     user_context = build_user_context(
         faction_name=faction.name,
         point_limit=point_limit,
         package_table=package_table,
+        spell_table=spell_table,
         force_org=force_org_summary(point_limit),
         user_prompt=user_prompt,
         correction_feedback=correction_feedback,
@@ -148,8 +166,24 @@ def suggest_list(
     )
     return package_suggestion_to_list_suggestion(
         package_suggestion,
-        package_lookup(packages),
+        package_lookup(visible_packages),
     )
+
+
+def _faction_spells(faction_id: int) -> list[dict]:
+    return [
+        {
+            "name": spell.name,
+            "threshold": spell.threshold,
+            "effect": spell.effect,
+            "role_tags": spell_role_tags(spell.effect),
+        }
+        for spell in FactionSpell.objects.filter(faction_id=faction_id).order_by(
+            "threshold",
+            "name",
+            "id",
+        )
+    ]
 
 
 def package_suggestion_to_list_suggestion(

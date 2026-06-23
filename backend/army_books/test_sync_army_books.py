@@ -5,6 +5,7 @@ from django.test import TestCase
 
 from army_books.models import (
     Faction,
+    FactionSpell,
     Unit,
     UnitUpgradeOption,
     UnitUpgradeSection,
@@ -25,6 +26,16 @@ BOOK_DETAIL = {
     "uid": "faction-angels",
     "name": "Kingdom of Angels",
     "versionString": "3.5.3",
+    "spells": [
+        {
+            "id": "spell-shield",
+            "name": "Shield Wall",
+            "type": 1,
+            "effect": 'Pick one friendly unit within 12", which gets +1 to Defense rolls.',
+            "threshold": 2,
+            "spellbookId": "angel-book",
+        }
+    ],
     "units": [
         {
             "id": "unit-paladins",
@@ -174,6 +185,10 @@ class SyncArmyBooksCommandTests(TestCase):
         self.assertEqual(weapon.ap, 2)
         self.assertEqual(weapon.special_rules, {"Deadly": 3})
         self.assertTrue(slot.is_default)
+        spell = FactionSpell.objects.get(faction=faction, source_uid="spell-shield")
+        self.assertEqual(spell.name, "Shield Wall")
+        self.assertEqual(spell.threshold, 2)
+        self.assertEqual(spell.spellbook_id, "angel-book")
         upgrade = UnitWeaponSlot.objects.get(unit=unit, weapon__source_uid="weapon-blessed-great")
         self.assertFalse(upgrade.is_default)
         self.assertEqual(upgrade.upgrade_cost, 25)
@@ -252,6 +267,19 @@ class SyncArmyBooksCommandTests(TestCase):
 
         self.assertEqual(UnitUpgradeSection.objects.count(), 0)
         self.assertEqual(UnitUpgradeOption.objects.count(), 0)
+
+    @patch("army_books.management.commands.sync_army_books.fetch_army_book")
+    @patch("army_books.management.commands.sync_army_books.fetch_army_book_list")
+    def test_re_sync_removes_stale_spell_metadata(self, mock_fetch_list, mock_fetch_book):
+        mock_fetch_list.return_value = BOOK_LIST
+        mock_fetch_book.return_value = BOOK_DETAIL
+
+        call_command("sync_army_books")
+        updated = {**BOOK_DETAIL, "spells": []}
+        mock_fetch_book.return_value = updated
+        call_command("sync_army_books")
+
+        self.assertEqual(FactionSpell.objects.count(), 0)
 
     @patch("army_books.management.commands.sync_army_books.fetch_army_book")
     @patch("army_books.management.commands.sync_army_books.fetch_army_book_list")

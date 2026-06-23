@@ -330,8 +330,11 @@ class SuggestionReconciliationTests(TestCase):
         )
 
         self.assertLessEqual(result.computed_total_points, 750)
-        self.assertEqual([unit.unit_name for unit in result.suggestion.units], ["Champion", "Guardians", "Guardians"])
-        self.assertIn("Champion was skipped because force organization allows at most 1 heroes.", result.warnings)
+        self.assertEqual(
+            [unit.unit_name for unit in result.suggestion.units],
+            ["Champion", "Champion", "Guardians", "Guardians"],
+        )
+        self.assertNotIn("Champion was skipped because force organization allows at most 1 heroes.", result.warnings)
         self.assertIn("Guardians was skipped because force organization allows at most 2 copies.", result.warnings)
 
     def test_preserves_legal_embedded_hero_parent_index(self):

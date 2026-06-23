@@ -4,10 +4,18 @@ from dataclasses import dataclass
 from typing import Any
 
 from army_books.calc.engine import calculate_ev
-from army_books.models import Unit, UnitUpgradeOption
+from army_books.models import FactionSpell, Unit, UnitUpgradeOption
 from lists.analysis import DEFAULT_TARGETS, TargetProfile, weapon_combat_context
 from lists.loadouts import aura_rule_names_from_gains, split_aura_rules
-from lists.validation import effective_max_models, is_hero, unit_selection_points
+from lists.validation import (
+    effective_max_models,
+    force_org_copy_limit,
+    force_org_group_limit,
+    force_org_group_point_cap,
+    force_org_hero_limit,
+    is_hero,
+    unit_selection_points,
+)
 
 
 @dataclass(frozen=True)
@@ -29,6 +37,8 @@ class AdvisorPackage:
     wounds_per_100pts_infantry: float
     role_tags: tuple[str, ...]
     aura_rules: tuple[str, ...]
+    caster_level: str
+    spell_role_tags: tuple[str, ...]
     can_embed_as_hero: bool
     can_host_embedded_hero: bool
     exceeds_group_cap: bool
@@ -41,8 +51,15 @@ def build_advisor_packages(faction_id: int, point_limit: int) -> list[AdvisorPac
         .order_by("name", "id")
     )
     packages: list[AdvisorPackage] = []
+    spell_role_tags = _faction_spell_role_tags(faction_id)
     for unit in units:
-        packages.append(_package_for_unit(unit=unit, point_limit=point_limit))
+        packages.append(
+            _package_for_unit(
+                unit=unit,
+                point_limit=point_limit,
+                spell_role_tags=spell_role_tags,
+            )
+        )
         for option in _upgrade_options(unit):
             if option.cost <= 0:
                 continue
@@ -50,6 +67,7 @@ def build_advisor_packages(faction_id: int, point_limit: int) -> list[AdvisorPac
                 _package_for_unit(
                     unit=unit,
                     point_limit=point_limit,
+                    spell_role_tags=spell_role_tags,
                     selected_upgrade_ids=[option.id],
                     upgrade_labels=[option.label],
                     package_suffix=f"o{option.id}",
@@ -61,14 +79,14 @@ def build_advisor_packages(faction_id: int, point_limit: int) -> list[AdvisorPac
 
 def build_package_table(packages: list[AdvisorPackage]) -> str:
     lines = [
-        "| Package | Unit | Pts | Models | Q | Def | T | AP | EV_inf | EV_eli | EV_mon | W100 | Upgrades | Roles | Aura | Embed | Legal |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| Package | Unit | Pts | Models | Q | Def | T | AP | EV_inf | EV_eli | EV_mon | W100 | Upgrades | Roles | Caster | Spell Roles | Aura | Embed | Legal |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for package in packages:
         lines.append(
             "| {package_id} | {unit} | {points} | {models} | {quality}+ | {defense}+ | "
             "{tough} | {ap} | {ev_inf:.2f} | {ev_eli:.2f} | {ev_mon:.2f} | {w100:.2f} | "
-            "{upgrades} | {roles} | {aura} | {embed} | {legal} |".format(
+            "{upgrades} | {roles} | {caster} | {spell_roles} | {aura} | {embed} | {legal} |".format(
                 package_id=package.package_id,
                 unit=_compact(package.unit_name, 36),
                 points=package.points,
@@ -83,12 +101,32 @@ def build_package_table(packages: list[AdvisorPackage]) -> str:
                 w100=package.wounds_per_100pts_infantry,
                 upgrades=_compact(", ".join(package.upgrade_labels), 60) if package.upgrade_labels else "-",
                 roles=", ".join(package.role_tags),
+                caster=package.caster_level or "-",
+                spell_roles=", ".join(package.spell_role_tags) if package.spell_role_tags else "-",
                 aura=_compact(", ".join(package.aura_rules), 48) if package.aura_rules else "-",
                 embed=_embed_summary(package),
                 legal="over 35% cap" if package.exceeds_group_cap else "ok",
             )
         )
     return "\n".join(lines)
+
+
+def prompt_packages(
+    packages: list[AdvisorPackage],
+    *,
+    point_limit: int,
+    max_rows: int,
+) -> list[AdvisorPackage]:
+    if max_rows <= 0:
+        return packages
+    legal = [
+        package
+        for package in packages
+        if not package.exceeds_group_cap and (point_limit <= 0 or package.points <= point_limit)
+    ]
+    candidates = legal or packages
+    ranked = sorted(candidates, key=_prompt_package_sort_key)
+    return ranked[:max_rows]
 
 
 def package_lookup(packages: list[AdvisorPackage]) -> dict[str, dict[str, Any]]:
@@ -103,14 +141,39 @@ def package_lookup(packages: list[AdvisorPackage]) -> dict[str, dict[str, Any]]:
     }
 
 
+def _prompt_package_sort_key(package: AdvisorPackage) -> tuple[int, int, float, str, str]:
+    role_priority = 0
+    if "core" in package.role_tags:
+        role_priority -= 2
+    if "mobility" in package.role_tags:
+        role_priority -= 2
+    if "anti-tough" in package.role_tags:
+        role_priority -= 1
+    if "ranged" in package.role_tags:
+        role_priority -= 1
+    if "hero" in package.role_tags or package.caster_level:
+        role_priority -= 1
+    return (
+        role_priority,
+        package.points,
+        -package.wounds_per_100pts_infantry,
+        package.unit_name,
+        package.package_id,
+    )
+
+
 def force_org_summary(point_limit: int) -> str:
     if point_limit <= 0:
         return "No force organization limits apply."
+    hero_limit = force_org_hero_limit(point_limit)
+    copy_limit = force_org_copy_limit(point_limit)
+    group_limit = force_org_group_limit(point_limit)
+    group_point_cap = force_org_group_point_cap(point_limit)
     return (
-        f"Force organization: max heroes {max(1, point_limit // 500)}, "
-        f"max copies per unit {1 + point_limit // 750}, "
-        f"max effective units {point_limit // 150}, "
-        f"single unit/group cap {int(point_limit * 0.35)} pts."
+        f"Force organization: max heroes {hero_limit}, "
+        f"max copies per unit {copy_limit}, "
+        f"max effective units {group_limit}, "
+        f"single unit/group cap {int(group_point_cap or 0)} pts."
     )
 
 
@@ -118,6 +181,7 @@ def _package_for_unit(
     *,
     unit: Unit,
     point_limit: int,
+    spell_role_tags: tuple[str, ...] = (),
     selected_upgrade_ids: list[int] | None = None,
     upgrade_labels: list[str] | None = None,
     package_suffix: str = "base",
@@ -126,6 +190,7 @@ def _package_for_unit(
     model_count = _default_model_count(unit)
     points = unit_selection_points(unit=unit, model_count=model_count, upgrade_cost=upgrade_cost)
     target_results = _target_scores(unit, model_count, points)
+    caster_level = _caster_level(unit.special_rules)
     return AdvisorPackage(
         package_id=f"u{unit.id}-{package_suffix}",
         unit_id=unit.id,
@@ -142,8 +207,10 @@ def _package_for_unit(
         ev_elite=target_results["elite"]["ev"],
         ev_monster=target_results["monster"]["ev"],
         wounds_per_100pts_infantry=target_results["infantry"]["wounds_per_100_points"],
-        role_tags=_role_tags(unit, points, point_limit),
+        role_tags=_role_tags(unit, points, point_limit, caster_level),
         aura_rules=_aura_rules(unit, selected_upgrade_ids or []),
+        caster_level=caster_level,
+        spell_role_tags=spell_role_tags if caster_level else (),
         can_embed_as_hero=_can_embed_as_hero(unit),
         can_host_embedded_hero=model_count > 1 and not is_hero(unit),
         exceeds_group_cap=point_limit > 0 and points > point_limit * 0.35,
@@ -204,18 +271,105 @@ def _target_score(unit: Unit, model_count: int, points: int, target: TargetProfi
     }
 
 
-def _role_tags(unit: Unit, points: int, point_limit: int) -> tuple[str, ...]:
+def _role_tags(unit: Unit, points: int, point_limit: int, caster_level: str = "") -> tuple[str, ...]:
     tags: list[str] = ["hero" if is_hero(unit) else "core"]
     if _has_any_rule(unit, ("Scout", "Fast", "Flying", "Strider", "Ambush")):
         tags.append("mobility")
     if any(slot.is_default and slot.weapon.range > 0 for slot in unit.weapon_slots.all()):
         tags.append("ranged")
-    if _max_ap(unit) >= 2 or unit.tough >= 3:
+    if _max_ap(unit) >= 2 or unit.tough >= 3 or _has_disintegrate_weapon(unit):
         tags.append("anti-tough")
     if point_limit > 0 and points <= point_limit * 0.12:
         tags.append("screen")
     if _has_any_rule(unit, ("Fearless", "Stealth", "Regeneration")):
         tags.append("support")
+    if caster_level:
+        tags.extend(("caster", "support"))
+    return tuple(dict.fromkeys(tags))
+
+
+def _caster_level(special_rules: dict[str, Any] | None) -> str:
+    if not special_rules:
+        return ""
+    for key, value in special_rules.items():
+        normalized = key.strip().lower()
+        if normalized == "caster":
+            return str(value) if value not in (None, "", True, False) else "1"
+        if normalized == "caster group" and value:
+            return "group"
+    return ""
+
+
+def _faction_spell_role_tags(faction_id: int) -> tuple[str, ...]:
+    roles: list[str] = []
+    for effect in FactionSpell.objects.filter(faction_id=faction_id).values_list("effect", flat=True):
+        roles.extend(spell_role_tags(effect))
+    return tuple(dict.fromkeys(roles))
+
+
+def spell_role_tags(effect: str) -> tuple[str, ...]:
+    text = effect.lower()
+    padded = f" {text} "
+    tags: list[str] = []
+    is_healing = any(
+        marker in text
+        for marker in (
+            "remove d3 wounds",
+            "remove one wound",
+            "removes d3 wounds",
+            "healing",
+            "heal",
+        )
+    )
+    if not is_healing and any(
+        marker in text
+        for marker in (
+            " takes ",
+            " hit",
+            "wound",
+            "ap(",
+            "deadly",
+            "poison",
+            "damage",
+        )
+    ):
+        tags.append("damage")
+    if any(
+        marker in text
+        for marker in (
+            "gets +",
+            "gets disintegrate",
+            "gets shred",
+            "gets rending",
+            "gets ap(",
+            "gets regeneration",
+        )
+    ):
+        tags.append("buff")
+    if any(marker in text for marker in ("-1", "loses", "enemy unit loses", "debuff")):
+        tags.append("debuff")
+    if any(marker in text for marker in ("defense", "cover", "ignore", "shield")):
+        tags.append("defense")
+    if is_healing:
+        tags.append("healing")
+    if any(
+        marker in padded
+        for marker in (
+            " move ",
+            " moves ",
+            " moving ",
+            " placed anywhere ",
+            " ambush ",
+            " scout ",
+            " advance ",
+            " charge ",
+        )
+    ):
+        tags.append("mobility")
+    if any(marker in text for marker in ("morale", "fear", "discipline")):
+        tags.append("morale")
+    if any(marker in text for marker in ("terrain", "impassable", "blocking", "objective")):
+        tags.append("control")
     return tuple(dict.fromkeys(tags))
 
 
@@ -246,6 +400,16 @@ def _has_any_rule(unit: Unit, names: tuple[str, ...]) -> bool:
     rules = unit.special_rules or {}
     normalized = {key.lower() for key, value in rules.items() if value}
     return any(name.lower() in normalized for name in names)
+
+
+def _has_disintegrate_weapon(unit: Unit) -> bool:
+    for slot in unit.weapon_slots.all():
+        if not slot.is_default:
+            continue
+        rules = slot.weapon.special_rules or {}
+        if any(key.lower() == "disintegrate" and bool(value) for key, value in rules.items()):
+            return True
+    return False
 
 
 def _compact(value: str, max_length: int) -> str:

@@ -28,9 +28,10 @@ Primary implementation seams:
 | Artillery | None | No Hold-only, long-range hit bonus, or incoming penalty. |
 | Bane | Partial | Ignores target Regeneration; missing forced reroll of unmodified Defense 6s. |
 | Blast(X) | Partial | Included in EV, but simplified as fixed attack count and no hit roll; missing per-hit multiplication, target model cap, and cover behavior. |
-| Caster(X) | None | No spell tokens or spell casting system. |
+| Caster(X) | Partial | Army Forge faction spells are synced and surfaced to the advisor; caster level and spell roles are exposed in advisor packages. No spell-token simulator, casting odds, blocking, or spell-resolution engine. |
 | Counter | None | No strikes-first or Impact reduction. |
 | Deadly(X) | High | Wound multiplication and distribution modeled; wound assignment/no-carryover details are not. |
+| Disintegrate | High | Ignores target Regeneration and applies AP(+2) against Defense 2+ or 3+ targets in EV/list/advisor scoring. Source note: present in current Army Forge data, but absent from the local AoF v3.5.1 print-friendly PDF. |
 | Fast | Partial | Advisor/list-health mobility signal; no movement simulation. |
 | Fear(X) | None | No melee-result modifier. |
 | Fearless | Partial | Advisor support/flag only; no morale reroll/pass mechanic. |
@@ -57,7 +58,7 @@ Primary implementation seams:
 
 Summary:
 
-- Strongest modeled rules: AP, Deadly, Regeneration, Rending, Surge, Tough.
+- Strongest modeled rules: AP, Deadly, Disintegrate, Regeneration, Rending, Surge, Tough.
 - Partially modeled combat rules: Bane, Blast, Furious, Impact, Indirect, Relentless, Sergeant, Stealth, Thrust, Unstoppable.
 - Strategic/advisor-only signals: Ambush, Fast, Fearless, Flying, Scout, Strider, plus support tagging for Regeneration and Stealth.
-- Mostly absent categories: movement/deployment simulation, morale, spells, terrain interaction, once-per-game tracking, individual model targeting, and charge-only context.
+- Mostly absent categories: movement/deployment simulation, morale, full spell resolution, terrain interaction, once-per-game tracking, individual model targeting, and charge-only context.

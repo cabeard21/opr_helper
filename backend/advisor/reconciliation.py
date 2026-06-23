@@ -5,7 +5,15 @@ from typing import Literal
 
 from advisor.llm_service import ListSuggestion, SuggestedUnit
 from army_books.models import Faction, Unit, UnitUpgradeOption, UnitWeaponSlot
-from lists.validation import effective_max_models, is_hero, unit_selection_points
+from lists.validation import (
+    effective_max_models,
+    force_org_copy_limit,
+    force_org_group_limit,
+    force_org_group_point_cap,
+    force_org_hero_limit,
+    is_hero,
+    unit_selection_points,
+)
 
 
 @dataclass(frozen=True)
@@ -52,10 +60,10 @@ def reconcile_suggestion(
     computed_total_points = 0
     hero_count = 0
     unit_copies: dict[int, int] = {}
-    max_heroes = max(1, point_limit // 500) if point_limit > 0 else None
-    max_copies = 1 + point_limit // 750 if point_limit > 0 else None
-    max_groups = point_limit // 150 if point_limit > 0 else None
-    group_point_cap = point_limit * 0.35 if point_limit > 0 else None
+    max_heroes = force_org_hero_limit(point_limit)
+    max_copies = force_org_copy_limit(point_limit)
+    max_groups = force_org_group_limit(point_limit)
+    group_point_cap = force_org_group_point_cap(point_limit)
 
     for suggested in suggestion.units:
         unit = suggested_units.get(suggested.unit_id)
@@ -508,13 +516,16 @@ def _can_include_unit(
     unit_lookup: dict[int, Unit],
     adding_group: bool,
 ) -> bool:
-    max_heroes = max(1, point_limit // 500)
-    max_copies = 1 + point_limit // 750
-    max_groups = point_limit // 150
-    group_point_cap = point_limit * 0.35
-    if _unit_points(candidate, model_count, selected_upgrade_ids) > group_point_cap:
+    max_heroes = force_org_hero_limit(point_limit)
+    max_copies = force_org_copy_limit(point_limit)
+    max_groups = force_org_group_limit(point_limit)
+    group_point_cap = force_org_group_point_cap(point_limit)
+    if (
+        group_point_cap is not None
+        and _unit_points(candidate, model_count, selected_upgrade_ids) > group_point_cap
+    ):
         return False
-    if adding_group and _effective_group_count(existing_units) + 1 > max_groups:
+    if max_groups is not None and adding_group and _effective_group_count(existing_units) + 1 > max_groups:
         return False
 
     hero_count = 0
@@ -527,9 +538,9 @@ def _can_include_unit(
             hero_count += 1
         copies[unit.id] = copies.get(unit.id, 0) + 1
 
-    if is_hero(candidate) and hero_count >= max_heroes:
+    if max_heroes is not None and is_hero(candidate) and hero_count >= max_heroes:
         return False
-    if copies.get(candidate.id, 0) >= max_copies:
+    if max_copies is not None and copies.get(candidate.id, 0) >= max_copies:
         return False
     return True
 

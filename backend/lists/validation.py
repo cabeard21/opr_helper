@@ -51,6 +51,30 @@ def is_hero(unit: Any) -> bool:
     return _has_rule(unit.special_rules, "Hero")
 
 
+def force_org_hero_limit(point_limit: int) -> int | None:
+    if point_limit <= 0:
+        return None
+    return max(1, point_limit // 375)
+
+
+def force_org_copy_limit(point_limit: int) -> int | None:
+    if point_limit <= 0:
+        return None
+    return 1 + point_limit // 750
+
+
+def force_org_group_limit(point_limit: int) -> int | None:
+    if point_limit <= 0:
+        return None
+    return point_limit // 150
+
+
+def force_org_group_point_cap(point_limit: int) -> float | None:
+    if point_limit <= 0:
+        return None
+    return point_limit * 0.35
+
+
 def can_host_hero(entry: ListUnit) -> bool:
     return entry.model_count > 1 and not is_hero(entry.unit)
 
@@ -168,8 +192,8 @@ def _force_org_errors(army_list: ArmyList, entries: list[ListUnit]) -> list[dict
 
     errors: list[dict[str, Any]] = []
     hero_count = sum(1 for entry in entries if is_hero(entry.unit))
-    hero_limit = max(1, army_list.point_limit // 500)
-    if hero_count > hero_limit:
+    hero_limit = force_org_hero_limit(army_list.point_limit)
+    if hero_limit is not None and hero_count > hero_limit:
         errors.append(
             {
                 "code": "too_many_heroes",
@@ -177,12 +201,12 @@ def _force_org_errors(army_list: ArmyList, entries: list[ListUnit]) -> list[dict
             }
         )
 
-    max_copies = 1 + army_list.point_limit // 750
+    max_copies = force_org_copy_limit(army_list.point_limit)
     unit_copies = Counter()
     for entry in entries:
         unit_copies[entry.unit_id] += max(1, entry.combined_from_count)
     for unit_id, copies in unit_copies.items():
-        if copies > max_copies:
+        if max_copies is not None and copies > max_copies:
             unit_name = next(entry.unit.name for entry in entries if entry.unit_id == unit_id)
             errors.append(
                 {
@@ -192,9 +216,9 @@ def _force_org_errors(army_list: ArmyList, entries: list[ListUnit]) -> list[dict
                 }
             )
 
-    max_groups = army_list.point_limit // 150
+    max_groups = force_org_group_limit(army_list.point_limit)
     effective_groups = sum(1 for entry in entries if entry.parent_entry_id is None)
-    if effective_groups > max_groups:
+    if max_groups is not None and effective_groups > max_groups:
         errors.append(
             {
                 "code": "too_many_units",
@@ -206,12 +230,12 @@ def _force_org_errors(army_list: ArmyList, entries: list[ListUnit]) -> list[dict
     for entry in entries:
         if entry.parent_entry_id:
             child_points[entry.parent_entry_id] += list_unit_points(entry)
-    point_cap = army_list.point_limit * 0.35
+    point_cap = force_org_group_point_cap(army_list.point_limit)
     for entry in entries:
         if entry.parent_entry_id:
             continue
         group_points = list_unit_points(entry) + child_points[entry.id]
-        if group_points > point_cap:
+        if point_cap is not None and group_points > point_cap:
             errors.append(
                 {
                     "code": "unit_group_over_point_share",

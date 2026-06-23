@@ -151,3 +151,16 @@ class UnitScorerTests(TestCase):
         profile = next(profile for profile in score_faction_units(self.faction.id) if profile.unit_id == self.paladins.id)
 
         self.assertEqual(profile.ev_infantry, 6.666667)
+
+    def test_scores_disintegrate_against_elite_defense(self):
+        self.weapon.special_rules = {"Disintegrate": True}
+        self.weapon.ap = 0
+        self.weapon.save()
+        self.paladins.quality = 4
+        self.paladins.save()
+
+        profile = next(profile for profile in score_faction_units(self.faction.id) if profile.unit_id == self.paladins.id)
+
+        self.assertEqual(profile.ev_infantry, 0.666667)
+        self.assertEqual(profile.ev_elite, 0.666667)
+        self.assertEqual(profile.ev_monster, 0.5)

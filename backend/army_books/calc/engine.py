@@ -105,7 +105,13 @@ def _single_attack_distribution(
     combat_context: dict[str, Any] | None,
 ) -> list[float]:
     if has_rule(special_rules, "Blast"):
-        wound_probability = p_fail_defense(defense, ap) * _regeneration_multiplier(
+        attack_ap = _effective_attack_ap(
+            ap=ap,
+            defense=defense,
+            special_rules=special_rules,
+            hit_roll=None,
+        )
+        wound_probability = p_fail_defense(defense, attack_ap) * _regeneration_multiplier(
             special_rules,
             target_special_rules,
             hit_roll=None,
@@ -208,7 +214,12 @@ def _hit_wound_distribution(
             hit_roll=hit_roll,
         )
     else:
-        attack_ap = ap + 4 if hit_roll == 6 and has_rule(special_rules, "Rending") else ap
+        attack_ap = _effective_attack_ap(
+            ap=ap,
+            defense=defense,
+            special_rules=special_rules,
+            hit_roll=hit_roll,
+        )
         wound_probability = p_fail_defense(defense, attack_ap) * _regeneration_multiplier(
             special_rules,
             target_special_rules,
@@ -258,6 +269,21 @@ def _impact_distribution(
         hit_roll=None,
     )
     return repeated_convolution([1 - wound_probability, wound_probability], impact_dice)
+
+
+def _effective_attack_ap(
+    *,
+    ap: float,
+    defense: float,
+    special_rules: dict[str, Any] | None,
+    hit_roll: int | None,
+) -> float:
+    bonus = 0
+    if hit_roll == 6 and has_rule(special_rules, "Rending"):
+        bonus = max(bonus, 4)
+    if has_rule(special_rules, "Disintegrate") and int(defense) in (2, 3):
+        bonus = max(bonus, 2)
+    return ap + bonus
 
 
 def _effective_hit_modifier(
@@ -323,7 +349,11 @@ def _regeneration_multiplier(
 ) -> float:
     if not has_rule(target_special_rules, "Regeneration"):
         return 1.0
-    if has_rule(special_rules, "Bane") or has_rule(special_rules, "Unstoppable"):
+    if (
+        has_rule(special_rules, "Bane")
+        or has_rule(special_rules, "Disintegrate")
+        or has_rule(special_rules, "Unstoppable")
+    ):
         return 1.0
     if has_rule(special_rules, "Rending"):
         return 1.0

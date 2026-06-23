@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from django.conf import settings
 
@@ -47,6 +48,9 @@ def build_system_prompt(game: str = "AoF") -> str:
         "Use the zero-based returned unit index when setting join_to_unit_index for an embedded hero. "
         "Aura abilities affect only the package that has the aura and the unit it is embedded in; "
         "if selecting an aura hero to support another unit, embed it with that host. "
+        "Caster(X) units generate spell tokens each round and unlock faction spells; select casters when their "
+        "spell roles support the requested plan, and warn when a magic-heavy plan has no caster. "
+        "Do not assume optional Advanced Casting, Living Spells, or Magic Items unless the user asks for them. "
         "Spend as close to the point limit as possible without exceeding it. "
         "Prefer lists with enough activation count: about 7 activations at 2000 points and at least 5 when possible. "
         "Prioritize mobility in AoF, especially Scout, Fast, Flying, Strider, and transports. "
@@ -92,6 +96,27 @@ def build_reference_material() -> str:
     return "\n\n".join(chunks)
 
 
+def build_spell_table(spells: list[dict[str, Any]]) -> str:
+    if not spells:
+        return ""
+    lines = [
+        "| Spell | Cast | Roles | Effect |",
+        "| --- | --- | --- | --- |",
+    ]
+    for spell in spells:
+        role_tags = spell.get("role_tags") or ()
+        effect = str(spell.get("effect") or "")
+        lines.append(
+            "| {name} | {threshold} | {roles} | {effect} |".format(
+                name=_compact_name(str(spell.get("name") or "")),
+                threshold=spell.get("threshold") or "-",
+                roles=", ".join(str(role) for role in role_tags) if role_tags else "-",
+                effect=_compact_effect(effect),
+            )
+        )
+    return "\n".join(lines)
+
+
 def build_user_context(
     *,
     faction_name: str,
@@ -99,11 +124,13 @@ def build_user_context(
     unit_table: str | None = None,
     user_prompt: str,
     package_table: str | None = None,
+    spell_table: str = "",
     force_org: str = "",
     correction_feedback: str = "",
 ) -> str:
     table = package_table if package_table is not None else unit_table or ""
     correction = f"\n\nCorrection feedback from validation:\n{correction_feedback.strip()}" if correction_feedback else ""
+    spells = f"\n\nFaction spells:\n{spell_table}" if spell_table else ""
     return (
         f"Faction: {faction_name}\n"
         f"Point limit: {point_limit}\n"
@@ -111,12 +138,18 @@ def build_user_context(
         f"User goal: {user_prompt.strip()}\n\n"
         "Available legal packages:\n"
         f"{table}"
+        f"{spells}"
         f"{correction}"
     )
 
 
 def _compact_name(name: str) -> str:
     return name.replace("|", "/")[:40]
+
+
+def _compact_effect(effect: str) -> str:
+    clean = " ".join(effect.replace("|", "/").split())
+    return clean if len(clean) <= 140 else f"{clean[:137]}..."
 
 
 def _yes_no(value: bool) -> str:

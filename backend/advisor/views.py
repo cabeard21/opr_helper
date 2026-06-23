@@ -1,3 +1,4 @@
+import logging
 import re
 
 from django.db import transaction
@@ -19,6 +20,8 @@ from army_books.models import Faction, Unit
 from lists.models import ArmyList, ListUnit, ListUnitUpgrade
 from lists.serializers import ArmyListSerializer
 from lists.validation import army_list_validation, selected_or_default_slot
+
+logger = logging.getLogger(__name__)
 
 
 def envelope(data=None, error=None, status_code=status.HTTP_200_OK):
@@ -59,6 +62,7 @@ def suggest_army_list(request):
         try:
             suggestion = suggest_list(payload["faction_id"], payload["point_limit"], payload["prompt"])
         except AdvisorLLMError:
+            logger.exception("Advisor provider unavailable during initial suggestion.")
             return envelope(error="Advisor provider unavailable.", status_code=status.HTTP_502_BAD_GATEWAY)
 
     reconciled = reconcile_suggestion(
@@ -80,6 +84,7 @@ def suggest_army_list(request):
                     correction_feedback=correction_feedback,
                 )
             except AdvisorLLMError:
+                logger.exception("Advisor provider unavailable during correction retry.")
                 retry_suggestion = None
             if retry_suggestion is not None:
                 retry_reconciled = reconcile_suggestion(

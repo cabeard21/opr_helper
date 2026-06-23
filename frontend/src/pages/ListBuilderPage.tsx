@@ -373,9 +373,9 @@ function ListUnitRow({
   const hasNativeUpgradeSections = (unit?.upgrade_sections.length ?? 0) > 0
 
   return (
-    <article className="rounded border p-3" style={{ borderColor: 'var(--color-border)' }}>
-      <div className="flex items-start justify-between gap-3">
-        <div>
+    <article className="min-w-0 rounded border p-3" style={{ borderColor: 'var(--color-border)' }}>
+      <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
+        <div className="min-w-0">
           <h3 className="font-semibold" style={{ color: 'var(--color-text)' }}>{entry.unit_name}</h3>
           <p className="app-muted text-sm">
             {entry.total_points.toLocaleString()} pts - {entry.selected_weapon_name ?? 'Default weapons'}
@@ -389,22 +389,24 @@ function ListUnitRow({
             </p>
           ) : null}
         </div>
-        <div className="flex flex-wrap justify-end gap-2">
+        <div className="flex flex-wrap gap-2 sm:justify-end">
           {calcHref ? (
             <Link
+              aria-label={`Calculate ${entry.unit_name}`}
               className="app-button-accent px-2 py-1"
               to={calcHref}
             >
-              Calculate {entry.unit_name}
+              Calculate
             </Link>
           ) : null}
           <button
+            aria-label={`Remove ${entry.unit_name}`}
             className="app-button-secondary px-2 py-1"
             disabled={busy}
             onClick={onRemove}
             type="button"
           >
-            Remove {entry.unit_name}
+            Remove
           </button>
         </div>
       </div>
@@ -419,7 +421,7 @@ function ListUnitRow({
                     {section.label}
                     <select
                       aria-label={`${section.label} for ${entry.unit_name}`}
-                      className="app-field"
+                      className="app-field min-w-0 w-full"
                       disabled={busy}
                       onChange={(event) => {
                         const optionId = event.target.value ? Number(event.target.value) : null
@@ -446,7 +448,7 @@ function ListUnitRow({
               Weapon for {entry.unit_name}
               <select
                 aria-label={`Weapon for ${entry.unit_name}`}
-                className="app-field"
+                className="app-field min-w-0 w-full"
                 disabled={busy}
                 onChange={(event) => onSelectWeapon(Number(event.target.value))}
                 value={selectedSlot?.id ?? ''}
@@ -514,7 +516,7 @@ function ListUnitRow({
               Embed {entry.unit_name}
               <select
                 aria-label={`Embed ${entry.unit_name}`}
-                className="app-field"
+                className="app-field min-w-0 w-full"
                 disabled={busy}
                 onChange={(event) => onParentChange(event.target.value ? Number(event.target.value) : null)}
                 value={entry.parent_entry ?? ''}
@@ -1120,6 +1122,8 @@ function buildListHealthMetrics(
   const effectiveEntries = armyList.units.filter((entry) => entry.parent_entry === null)
   const activationTarget = armyList.point_limit >= 1500 ? 7 : 5
   const mobileEntries = effectiveEntries.filter((entry) => entryHasAnyRule(entry, unitLookup, MOBILITY_RULES))
+  const castingTarget = armyList.point_limit >= 1500 ? 3 : 1
+  const castingPower = totalCastingPower(armyList, unitLookup)
   const averageWoundsPer100 = average(analysis.totals.map((total) => total.wounds_per_100_points))
   const averageDurability = average(analysis.units.map((unit) => unit.effective_wounds_per_100_points))
   const weakestTarget = [...analysis.totals].sort((left, right) => left.wounds_per_100_points - right.wounds_per_100_points)[0]
@@ -1143,6 +1147,12 @@ function buildListHealthMetrics(
       'Objective Reach',
       effectiveEntries.length > 0 ? clampScore((mobileEntries.length / effectiveEntries.length) * 100) : 0,
       `${mobileEntries.length} of ${effectiveEntries.length} effective units show reach rules`,
+    ),
+    metric(
+      'casting-support',
+      'Casting Support',
+      clampScore((castingPower / castingTarget) * 100),
+      `${castingPower} casting power / target ${castingTarget}`,
     ),
     metric(
       'damage-pressure',
@@ -1187,6 +1197,7 @@ function graphAxisLabel(metric: ListHealthMetric) {
   const labels: Record<string, string> = {
     'activation-health': 'Activation',
     'objective-reach': 'Reach',
+    'casting-support': 'Casting',
     'damage-pressure': 'Damage',
     durability: 'Durability',
     'threat-coverage': 'Coverage',
@@ -1223,19 +1234,94 @@ function entryHasAnyRule(entry: ListUnit, unitLookup: Map<number, Unit>, rules: 
   return rulesForEntry(entry, unit).some((rule) => rules.has(rule))
 }
 
+function totalCastingPower(armyList: ArmyList, unitLookup: Map<number, Unit>) {
+  return armyList.units.reduce((sum, entry) => sum + castingPowerForEntry(entry, unitLookup), 0)
+}
+
+function castingPowerForEntry(entry: ListUnit, unitLookup: Map<number, Unit>) {
+  const unit = unitLookup.get(entry.unit)
+  if (!unit) {
+    return 0
+  }
+  const rules = specialRulesForEntry(entry, unit)
+  const casterPower = castingRuleValue(rules.get('caster'))
+  const casterGroupPower = rules.has('caster group') && rules.get('caster group') !== false ? 1 : 0
+  return Math.max(casterPower, casterGroupPower)
+}
+
 function rulesForEntry(entry: ListUnit, unit: Unit) {
-  const rules = new Set(Object.keys(unit.special_rules).map(normalizeRule))
+  return [...specialRulesForEntry(entry, unit).keys()]
+}
+
+function specialRulesForEntry(entry: ListUnit, unit: Unit) {
+  const rules = new Map<string, unknown>()
+  for (const [rule, value] of Object.entries(unit.special_rules)) {
+    addSpecialRule(rules, rule, value)
+  }
   for (const section of unit.upgrade_sections) {
     for (const option of section.options) {
       if (!entry.selected_upgrades.includes(option.id)) {
         continue
       }
       for (const gainedRule of option.gains) {
-        Object.keys(gainedRule).forEach((rule) => rules.add(normalizeRule(rule)))
+        addGainRules(rules, gainedRule)
       }
     }
   }
-  return [...rules]
+  return rules
+}
+
+function addGainRules(rules: Map<string, unknown>, gain: Record<string, unknown>) {
+  const content = gain.content
+  if (Array.isArray(content)) {
+    for (const contentRule of content) {
+      if (!isRuleRecord(contentRule)) {
+        continue
+      }
+      const name = contentRule.name
+      if (typeof name === 'string') {
+        addSpecialRule(rules, name, contentRule.rating ?? true)
+      }
+    }
+    return
+  }
+
+  const name = gain.name
+  if (typeof name === 'string') {
+    addSpecialRule(rules, name, gain.rating ?? true)
+    return
+  }
+
+  for (const [rule, value] of Object.entries(gain)) {
+    addSpecialRule(rules, rule, value)
+  }
+}
+
+function isRuleRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function addSpecialRule(rules: Map<string, unknown>, rule: string, value: unknown) {
+  const normalized = normalizeRule(rule)
+  if (!normalized) {
+    return
+  }
+  if (normalized === 'caster' && rules.has(normalized)) {
+    rules.set(normalized, Math.max(castingRuleValue(rules.get(normalized)), castingRuleValue(value)))
+    return
+  }
+  rules.set(normalized, value)
+}
+
+function castingRuleValue(value: unknown) {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.max(0, value)
+  }
+  if (typeof value === 'string') {
+    const parsed = Number(value.trim())
+    return Number.isFinite(parsed) ? Math.max(0, parsed) : 0
+  }
+  return value === true ? 1 : 0
 }
 
 function normalizeRule(rule: string) {

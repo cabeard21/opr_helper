@@ -91,6 +91,72 @@ const archers: Unit = {
   ],
 }
 
+const frogMage: Unit = {
+  ...paladins,
+  id: 13,
+  name: 'Frog Mage',
+  points: 120,
+  special_rules: { Caster: 3, Hero: true },
+  source_uid: 'unit-13',
+  weapon_slots: [
+    {
+      ...paladins.weapon_slots[0],
+      id: 25,
+      weapon: {
+        ...paladins.weapon_slots[0].weapon,
+        id: 36,
+        name: 'Staff',
+        source_uid: 'weapon-36',
+      },
+    },
+  ],
+}
+
+const acolytes: Unit = {
+  ...paladins,
+  id: 14,
+  name: 'Acolytes',
+  points: 110,
+  special_rules: {},
+  source_uid: 'unit-14',
+  weapon_slots: [
+    {
+      ...paladins.weapon_slots[0],
+      id: 26,
+      weapon: {
+        ...paladins.weapon_slots[0].weapon,
+        id: 37,
+        name: 'Ceremonial Blades',
+        source_uid: 'weapon-37',
+      },
+    },
+  ],
+  upgrade_sections: [
+    {
+      id: 50,
+      package_uid: 'caster-package',
+      section_uid: 'caster-section',
+      label: 'Mystic training',
+      variant: 'upgrade',
+      targets: [],
+      options: [
+        {
+          id: 51,
+          option_uid: 'caster-option',
+          label: 'Apprentice Circle',
+          cost: 30,
+          gains: [
+            {
+              content: [{ name: 'Caster', rating: '2' }],
+            },
+          ],
+          weapons: [],
+        },
+      ],
+    },
+  ],
+}
+
 const bullConstruct: Unit = {
   ...paladins,
   id: 12,
@@ -197,6 +263,61 @@ const listWithPaladins: ArmyList = {
       combined_from_count: 1,
       notes: '',
       total_points: 180,
+    },
+  ],
+}
+
+const listWithCasting: ArmyList = {
+  ...emptyList,
+  total_points: 410,
+  units: [
+    {
+      id: 100,
+      unit: paladins.id,
+      unit_name: paladins.name,
+      unit_points: paladins.points,
+      model_count: 1,
+      selected_weapon_slot: 20,
+      selected_weapon_name: 'Great Weapon',
+      selected_upgrades: [],
+      loadout_weapon_names: ['Great Weapon'],
+      loadout_summary: 'Great Weapon',
+      parent_entry: null,
+      combined_from_count: 1,
+      notes: '',
+      total_points: 180,
+    },
+    {
+      id: 102,
+      unit: frogMage.id,
+      unit_name: frogMage.name,
+      unit_points: frogMage.points,
+      model_count: 1,
+      selected_weapon_slot: 25,
+      selected_weapon_name: 'Staff',
+      selected_upgrades: [],
+      loadout_weapon_names: ['Staff'],
+      loadout_summary: 'Staff',
+      parent_entry: 100,
+      combined_from_count: 1,
+      notes: '',
+      total_points: 120,
+    },
+    {
+      id: 103,
+      unit: acolytes.id,
+      unit_name: acolytes.name,
+      unit_points: acolytes.points,
+      model_count: 1,
+      selected_weapon_slot: 26,
+      selected_weapon_name: 'Ceremonial Blades',
+      selected_upgrades: [51],
+      loadout_weapon_names: ['Ceremonial Blades'],
+      loadout_summary: 'Ceremonial Blades + Apprentice Circle',
+      parent_entry: null,
+      combined_from_count: 1,
+      notes: '',
+      total_points: 140,
     },
   ],
 }
@@ -558,6 +679,7 @@ describe('ListBuilderPage', () => {
     expect(graph).toBeInTheDocument()
     expect(within(graph).getByText('Activation')).toBeInTheDocument()
     expect(within(graph).getByText('Reach')).toBeInTheDocument()
+    expect(within(graph).getByText('Casting')).toBeInTheDocument()
     expect(within(graph).getByText('Damage')).toBeInTheDocument()
     expect(within(graph).getByText('Durability')).toBeInTheDocument()
     expect(within(graph).getByText('Coverage')).toBeInTheDocument()
@@ -565,11 +687,13 @@ describe('ListBuilderPage', () => {
     expect(screen.getByText('Balanced list profile')).toBeInTheDocument()
     expect(screen.getByText('Activation Health')).toBeInTheDocument()
     expect(screen.getByText('Objective Reach')).toBeInTheDocument()
+    expect(screen.getByText('Casting Support')).toBeInTheDocument()
     expect(screen.getByText('Damage Pressure')).toBeInTheDocument()
     expect(screen.getAllByText('Durability').length).toBeGreaterThan(0)
     expect(screen.getByText('Threat Coverage')).toBeInTheDocument()
     expect(screen.getByText('Battleline Balance')).toBeInTheDocument()
     expect(screen.getByText(/1 effective activations \/ target 7/i)).toBeInTheDocument()
+    expect(screen.getByText(/0 casting power \/ target 3/i)).toBeInTheDocument()
     expect(screen.getByText(/0% ranged \/ 100% melee/i)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /^toughness$/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /toughness \/ 100 pts/i })).toBeInTheDocument()
@@ -581,6 +705,110 @@ describe('ListBuilderPage', () => {
     await waitFor(() => {
       expect(apiClient.exportArmyForgeList).toHaveBeenCalledWith(1)
     })
+  })
+
+  it('counts embedded casters and selected caster upgrades in the profile metric', async () => {
+    const user = userEvent.setup()
+    vi.mocked(apiClient.getList).mockResolvedValue(listWithCasting)
+    vi.mocked(apiClient.getFactionUnits).mockResolvedValue([paladins, frogMage, acolytes])
+    vi.mocked(apiClient.analyzeList).mockResolvedValue({
+      list_id: 1,
+      targets: [
+        { id: 'infantry', name: 'Infantry', defense: 5, tough: 1 },
+        { id: 'elite', name: 'Elite', defense: 3, tough: 3 },
+        { id: 'monster', name: 'Monster', defense: 2, tough: 10 },
+      ],
+      units: [
+        {
+          list_unit_id: 100,
+          unit_id: 10,
+          unit_name: 'Paladins',
+          model_count: 1,
+          points: 180,
+          effective_wounds: 18,
+          effective_wounds_per_100_points: 10,
+          weapon_id: 30,
+          weapon_name: 'Great Weapon',
+          target_results: [
+            {
+              target_id: 'infantry',
+              ev: 1,
+              ranged_ev: 0,
+              melee_ev: 1,
+              wounds_per_100_points: 0.55,
+              ranged_wounds_per_100_points: 0,
+              melee_wounds_per_100_points: 0.55,
+              p_kill_model: 0.5,
+            },
+            {
+              target_id: 'elite',
+              ev: 0.5,
+              ranged_ev: 0,
+              melee_ev: 0.5,
+              wounds_per_100_points: 0.28,
+              ranged_wounds_per_100_points: 0,
+              melee_wounds_per_100_points: 0.28,
+              p_kill_model: 0.2,
+            },
+            {
+              target_id: 'monster',
+              ev: 0.25,
+              ranged_ev: 0,
+              melee_ev: 0.25,
+              wounds_per_100_points: 0.14,
+              ranged_wounds_per_100_points: 0,
+              melee_wounds_per_100_points: 0.14,
+              p_kill_model: 0.05,
+            },
+          ],
+        },
+      ],
+      totals: [
+        {
+          target_id: 'infantry',
+          ev: 1,
+          ranged_ev: 0,
+          melee_ev: 1,
+          wounds_per_100_points: 0.24,
+          ranged_wounds_per_100_points: 0,
+          melee_wounds_per_100_points: 0.24,
+        },
+        {
+          target_id: 'elite',
+          ev: 0.5,
+          ranged_ev: 0,
+          melee_ev: 0.5,
+          wounds_per_100_points: 0.12,
+          ranged_wounds_per_100_points: 0,
+          melee_wounds_per_100_points: 0.12,
+        },
+        {
+          target_id: 'monster',
+          ev: 0.25,
+          ranged_ev: 0,
+          melee_ev: 0.25,
+          wounds_per_100_points: 0.06,
+          ranged_wounds_per_100_points: 0,
+          melee_wounds_per_100_points: 0.06,
+        },
+      ],
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/lists/1']}>
+        <Routes>
+          <Route path="/lists/:id" element={<ListBuilderPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByRole('heading', { name: 'Tournament 2000' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /analysis/i }))
+
+    const graph = await screen.findByRole('img', { name: /balanced list web graph/i })
+    expect(within(graph).getByText('Casting')).toBeInTheDocument()
+    expect(screen.getByText('Casting Support')).toBeInTheDocument()
+    expect(screen.getByText(/5 casting power \/ target 3/i)).toBeInTheDocument()
   })
 
   it('sorts analysis table by unit name and target efficiency', async () => {

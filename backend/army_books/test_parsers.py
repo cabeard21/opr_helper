@@ -2,6 +2,7 @@ import pytest
 
 from army_books.parsers import (
     parse_attacks_value,
+    parse_spell,
     parse_special_rules,
     parse_stat_target,
     parse_unit,
@@ -174,4 +175,26 @@ def test_parse_weapon_maps_current_army_forge_weapon_shape():
         "attacks_string": "A6",
         "ap": 2,
         "special_rules": {"Rending": True},
+    }
+
+
+def test_parse_spell_maps_army_forge_spell_shape():
+    raw_spell = {
+        "id": "spell-poison-mist",
+        "name": "Poison Mist",
+        "type": 2,
+        "effect": 'Pick one enemy unit within 18", which friendly units gets Shred.',
+        "threshold": 1,
+        "spellbookId": "book-saurians",
+        "generation": {"effect": {"id": "generated-effect"}},
+    }
+
+    assert parse_spell(raw_spell) == {
+        "source_uid": "spell-poison-mist",
+        "name": "Poison Mist",
+        "threshold": 1,
+        "effect": 'Pick one enemy unit within 18", which friendly units gets Shred.',
+        "spellbook_id": "book-saurians",
+        "spell_type": 2,
+        "raw_data": raw_spell,
     }

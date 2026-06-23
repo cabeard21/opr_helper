@@ -1,7 +1,7 @@
 from django.test import TestCase
 
-from advisor.packages import build_advisor_packages, build_package_table
-from army_books.models import Faction, Unit, UnitUpgradeOption, UnitUpgradeSection, UnitWeaponSlot, Weapon
+from advisor.packages import build_advisor_packages, build_package_table, force_org_summary, prompt_packages
+from army_books.models import Faction, FactionSpell, Unit, UnitUpgradeOption, UnitUpgradeSection, UnitWeaponSlot, Weapon
 
 
 class AdvisorPackageTests(TestCase):
@@ -69,13 +69,51 @@ class AdvisorPackageTests(TestCase):
         table = build_package_table(build_advisor_packages(self.faction.id, point_limit=750))
 
         self.assertIn(
-            "| Package | Unit | Pts | Models | Q | Def | T | AP | EV_inf | EV_eli | EV_mon | W100 | Upgrades | Roles | Aura | Embed | Legal |",
+            "| Package | Unit | Pts | Models | Q | Def | T | AP | EV_inf | EV_eli | EV_mon | W100 | Upgrades | Roles | Caster | Spell Roles | Aura | Embed | Legal |",
             table,
         )
         self.assertIn("u", table)
         self.assertIn("| 1.00 | 0.67 | 0.50 | 1.00 |", table)
         self.assertIn("mobility", table)
         self.assertIn("ok", table)
+
+    def test_force_org_summary_uses_aof_hero_limit(self):
+        self.assertIn("max heroes 2", force_org_summary(750))
+
+    def test_packages_surface_caster_level_and_faction_spell_roles(self):
+        caster = self._unit(name="Frog Mage", points=205, special_rules={"Caster": 3, "Hero": True})
+        FactionSpell.objects.create(
+            faction=self.faction,
+            source_uid="spell-heal",
+            name="Healing Swarm",
+            threshold=2,
+            effect='Pick one friendly unit within 12", which removes D3 wounds.',
+        )
+        FactionSpell.objects.create(
+            faction=self.faction,
+            source_uid="spell-bolt",
+            name="Lightning Bolt",
+            threshold=1,
+            effect='Pick one enemy unit within 18", which takes 2 hits with AP(2).',
+        )
+
+        packages = build_advisor_packages(self.faction.id, point_limit=750)
+
+        package = next(candidate for candidate in packages if candidate.unit_id == caster.id)
+        self.assertEqual(package.caster_level, "3")
+        self.assertIn("caster", package.role_tags)
+        self.assertEqual(package.spell_role_tags, ("damage", "healing"))
+
+    def test_caster_group_is_marked_without_numeric_level(self):
+        unit = self._unit(name="Mage Council", points=170, special_rules={"Caster Group": True})
+
+        package = next(
+            candidate for candidate in build_advisor_packages(self.faction.id, point_limit=750)
+            if candidate.unit_id == unit.id
+        )
+
+        self.assertEqual(package.caster_level, "group")
+        self.assertIn("caster", package.role_tags)
 
     def test_package_offense_uses_melee_charge_context(self):
         melee_weapon = Weapon.objects.create(
@@ -101,6 +139,39 @@ class AdvisorPackageTests(TestCase):
 
         self.assertEqual(packages[melee_unit.id].ev_infantry, 3.777778)
         self.assertEqual(packages[ranged_unit.id].ev_infantry, 2.0)
+
+    def test_package_offense_and_roles_value_disintegrate_against_elite_defense(self):
+        hex_weapon = Weapon.objects.create(
+            name="Hex Rifle",
+            range=18,
+            attacks=2,
+            attacks_string="A2",
+            ap=0,
+            special_rules={"Disintegrate": True},
+        )
+        unit = self._unit(name="Hex Shooters", points=100, weapon=hex_weapon)
+
+        package = next(
+            candidate for candidate in build_advisor_packages(self.faction.id, point_limit=750)
+            if candidate.unit_id == unit.id
+        )
+
+        self.assertEqual(package.ev_infantry, 0.666667)
+        self.assertEqual(package.ev_elite, 0.666667)
+        self.assertEqual(package.ev_monster, 0.5)
+        self.assertIn("anti-tough", package.role_tags)
+
+    def test_prompt_packages_are_bounded_and_legal_first(self):
+        self._unit(name="Giant", points=400, tough=12)
+        for index in range(6):
+            self._unit(name=f"Scout {index}", points=80 + index, special_rules={"Scout": True})
+
+        packages = build_advisor_packages(self.faction.id, point_limit=750)
+        visible = prompt_packages(packages, point_limit=750, max_rows=3)
+
+        self.assertEqual(len(visible), 3)
+        self.assertTrue(all(not package.exceeds_group_cap for package in visible))
+        self.assertNotIn("Giant", [package.unit_name for package in visible])
 
     def test_packages_mark_aura_upgrades_and_embedding_roles(self):
         host = self._unit(

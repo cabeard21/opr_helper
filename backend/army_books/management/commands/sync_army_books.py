@@ -8,6 +8,7 @@ from django.utils import timezone
 
 from army_books.models import (
     Faction,
+    FactionSpell,
     Unit,
     UnitUpgradeOption,
     UnitUpgradeOptionWeapon,
@@ -16,7 +17,7 @@ from army_books.models import (
     Weapon,
 )
 from army_books.opr_client import fetch_army_book, fetch_army_book_list
-from army_books.parsers import parse_unit, parse_weapon
+from army_books.parsers import parse_spell, parse_unit, parse_weapon
 
 
 class Command(BaseCommand):
@@ -39,7 +40,7 @@ class Command(BaseCommand):
             )
             return
 
-        summary = {"factions": 0, "units": 0, "weapons": 0, "slots": 0}
+        summary = {"factions": 0, "units": 0, "weapons": 0, "slots": 0, "spells": 0}
         for listed_book in books:
             uid = _source_uid(listed_book)
             if not uid:
@@ -50,6 +51,7 @@ class Command(BaseCommand):
             if dry_run:
                 summary["factions"] += 1
                 summary["units"] += len(_units(detail))
+                summary["spells"] += len(_spells(detail))
                 continue
 
             with transaction.atomic():
@@ -63,7 +65,8 @@ class Command(BaseCommand):
                 f"{summary['factions']} factions, "
                 f"{summary['units']} units, "
                 f"{summary['weapons']} weapons, "
-                f"{summary['slots']} weapon slots."
+                f"{summary['slots']} weapon slots, "
+                f"{summary['spells']} spells."
             )
         )
 
@@ -71,8 +74,9 @@ class Command(BaseCommand):
 def _sync_book(book: dict[str, Any], fallback: dict[str, Any]) -> dict[str, int]:
     merged_book = {**fallback, **book}
     faction = _upsert_faction(merged_book)
-    summary = {"factions": 1, "units": 0, "weapons": 0, "slots": 0}
+    summary = {"factions": 1, "units": 0, "weapons": 0, "slots": 0, "spells": 0}
     upgrade_packages = _upgrade_package_lookup(merged_book)
+    summary["spells"] = _sync_spells(faction, merged_book)
 
     for raw_unit in _units(merged_book):
         unit_kwargs = parse_unit(raw_unit)
@@ -97,6 +101,21 @@ def _sync_book(book: dict[str, Any], fallback: dict[str, Any]) -> dict[str, int]
         _sync_unit_upgrades(unit, raw_unit, upgrade_packages)
 
     return summary
+
+
+def _sync_spells(faction: Faction, book: dict[str, Any]) -> int:
+    seen_spell_ids: set[str] = set()
+    for raw_spell in _spells(book):
+        spell_kwargs = parse_spell(raw_spell)
+        source_uid = spell_kwargs.pop("source_uid")
+        seen_spell_ids.add(source_uid)
+        FactionSpell.objects.update_or_create(
+            faction=faction,
+            source_uid=source_uid,
+            defaults=spell_kwargs,
+        )
+    faction.spells.exclude(source_uid__in=seen_spell_ids).delete()
+    return len(seen_spell_ids)
 
 
 def _upsert_faction(book: dict[str, Any]) -> Faction:
@@ -199,6 +218,11 @@ def _source_uid(raw: dict[str, Any]) -> str | None:
 
 def _units(book: dict[str, Any]) -> list[dict[str, Any]]:
     return book.get("units") or book.get("profiles") or []
+
+
+def _spells(book: dict[str, Any]) -> list[dict[str, Any]]:
+    spells = book.get("spells") or []
+    return [spell for spell in spells if isinstance(spell, dict)]
 
 
 def _weapons(unit: dict[str, Any]) -> list[dict[str, Any]]:

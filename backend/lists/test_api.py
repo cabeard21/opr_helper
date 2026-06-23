@@ -460,6 +460,41 @@ class ListsApiTests(TestCase):
         self.assertIn("too_many_unit_copies", codes)
         self.assertIn("unit_group_over_point_share", codes)
 
+    def test_force_org_allows_two_heroes_at_750_points(self):
+        army_list = ArmyList.objects.create(
+            name="Tournament 750",
+            faction=self.faction,
+            point_limit=750,
+        )
+        for index in range(2):
+            ListUnit.objects.create(
+                army_list=army_list,
+                unit=self.hero,
+                model_count=1,
+                selected_weapon_slot=self.hero_slot,
+                notes=f"Hero {index}",
+            )
+
+        response = self.client.get(f"/api/lists/{army_list.id}/")
+
+        self.assertEqual(response.status_code, 200)
+        codes = {message["code"] for message in response.json()["data"]["validation"]["errors"]}
+        self.assertNotIn("too_many_heroes", codes)
+
+        ListUnit.objects.create(
+            army_list=army_list,
+            unit=self.hero,
+            model_count=1,
+            selected_weapon_slot=self.hero_slot,
+            notes="Hero 2",
+        )
+
+        response = self.client.get(f"/api/lists/{army_list.id}/")
+
+        self.assertEqual(response.status_code, 200)
+        codes = {message["code"] for message in response.json()["data"]["validation"]["errors"]}
+        self.assertIn("too_many_heroes", codes)
+
     def test_rejects_illegal_hero_attachment_to_single_model_unit(self):
         army_list = ArmyList.objects.create(
             name="Tournament 2000",
@@ -848,6 +883,33 @@ class ListsApiTests(TestCase):
         unit_result = response.json()["data"]["units"][0]
         self.assertEqual(unit_result["effective_wounds"], 18.0)
         self.assertEqual(unit_result["effective_wounds_per_100_points"], 5.0)
+
+    def test_analyze_list_applies_disintegrate_against_elite_defense(self):
+        self.weapon.ap = 0
+        self.weapon.special_rules = {"Disintegrate": True}
+        self.weapon.save()
+        army_list = ArmyList.objects.create(
+            name="Tournament 2000",
+            faction=self.faction,
+            point_limit=2000,
+        )
+        ListUnit.objects.create(
+            army_list=army_list,
+            unit=self.unit,
+            model_count=1,
+            selected_weapon_slot=self.slot,
+        )
+
+        response = self.client.post(
+            f"/api/lists/{army_list.id}/analysis/",
+            {"targets": [{"id": "elite", "name": "Elite", "defense": 3, "tough": 3}]},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        target_result = response.json()["data"]["units"][0]["target_results"][0]
+        self.assertEqual(target_result["ev"], 0.888889)
+        self.assertEqual(target_result["wounds_per_100_points"], round((0.888889 / 180) * 100, 6))
 
     def test_analyze_list_uses_upgrade_cost_for_efficiency(self):
         army_list = ArmyList.objects.create(
