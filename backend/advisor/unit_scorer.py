@@ -3,7 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from army_books.calc.engine import calculate_distribution, calculate_ev
+from army_books.calc.engine import calculate_distribution
+from army_books.calc.weapon_scoring import weapon_ev_profile
 from army_books.models import Unit, UnitWeaponSlot
 from lists.analysis import TargetProfile, default_target_profiles, defensive_wound_multiplier, weapon_combat_context
 from lists.validation import unit_selection_points
@@ -123,15 +124,15 @@ def _target_score(
         attacks = weapon.attacks * unit.default_models
         special_rules = {**unit.special_rules, **weapon.special_rules}
         combat_context = weapon_combat_context(weapon, unit.default_models, target.tough, target.unit_size)
-        ev += calculate_ev(
-            attacks,
-            unit.quality,
-            target.defense,
-            weapon.ap,
-            special_rules,
+        ev += weapon_ev_profile(
+            weapon=weapon,
+            attacks=attacks,
+            quality=unit.quality,
+            defense=target.defense,
+            special_rules=special_rules,
             target_special_rules=target.special_rules,
             combat_context=combat_context,
-        )
+        ).sustained_ev
         distribution = calculate_distribution(
             attacks,
             unit.quality,

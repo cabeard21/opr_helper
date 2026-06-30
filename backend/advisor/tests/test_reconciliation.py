@@ -326,6 +326,72 @@ class SuggestionReconciliationTests(TestCase):
         self.assertIn(f"Paladins ignored invalid upgrade id {wrong_unit_option.id}.", result.warnings)
         self.assertIn("Paladins ignored invalid upgrade id 99999.", result.warnings)
 
+    def test_dependent_selected_upgrade_is_auto_completed(self):
+        winged_wardens = self._unit_with_default_weapon("Winged Wardens", 100)
+        javelin = Weapon.objects.create(
+            name="Javelin",
+            range=12,
+            attacks=1,
+            attacks_string="A1",
+            ap=0,
+        )
+        storm_trident_weapon = Weapon.objects.create(
+            name="Storm Trident",
+            range=18,
+            attacks=1,
+            attacks_string="A1",
+            ap=2,
+        )
+        javelin_section = UnitUpgradeSection.objects.create(
+            unit=winged_wardens,
+            section_uid="winged-warden-javelins",
+            label="Take Javelins",
+            variant="upgrade",
+        )
+        javelins = UnitUpgradeOption.objects.create(
+            section=javelin_section,
+            option_uid="javelins",
+            label="Javelins",
+            cost=10,
+        )
+        javelins.weapons.add(javelin)
+        trident_section = UnitUpgradeSection.objects.create(
+            unit=winged_wardens,
+            section_uid="winged-warden-trident",
+            label="Replace one Javelin",
+            variant="replace",
+            targets=["Javelins"],
+        )
+        storm_trident = UnitUpgradeOption.objects.create(
+            section=trident_section,
+            option_uid="storm-trident",
+            label="Storm Trident",
+            cost=15,
+        )
+        storm_trident.weapons.add(storm_trident_weapon)
+        suggestion = self._suggestion(
+            SuggestedUnit(
+                unit_id=winged_wardens.id,
+                unit_name="Winged Wardens",
+                model_count=1,
+                selected_upgrade_ids=[storm_trident.id],
+                justification="Mobile ranged pressure.",
+            )
+        )
+
+        result = reconcile_suggestion(
+            faction=self.faction,
+            point_limit=750,
+            suggestion=suggestion,
+        )
+
+        self.assertEqual(result.suggestion.units[0].selected_upgrade_ids, [javelins.id, storm_trident.id])
+        self.assertEqual(result.computed_total_points, 125)
+        self.assertIn(
+            "Winged Wardens added Javelins because Storm Trident requires it.",
+            result.warnings,
+        )
+
     def test_repair_can_add_legal_upgrade_to_reduce_point_delta(self):
         unit_a = self._unit_with_default_weapon("Line Guard", 100)
         unit_b = self._unit_with_default_weapon("Rangers", 130)

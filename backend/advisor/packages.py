@@ -1,12 +1,21 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from itertools import combinations
 from typing import Any
 
-from army_books.calc.engine import calculate_ev
+from army_books.calc.weapon_scoring import weapon_ev_profile, weapon_has_limited_rule
 from army_books.models import FactionSpell, Unit, UnitUpgradeOption
+from army_books.upgrade_matching import weapon_matches_upgrade_target
+from army_books.upgrade_resolution import resolve_unit_upgrade_options
 from lists.analysis import TargetProfile, default_target_profiles, weapon_combat_context
-from lists.loadouts import aura_rule_names_from_gains, split_aura_rules
+from lists.loadouts import (
+    aura_rule_names_from_gains,
+    split_aura_rules,
+    weapon_attack_count,
+    weapon_count,
+    weapon_with_count,
+)
 from lists.validation import (
     effective_max_models,
     force_org_copy_limit,
@@ -26,6 +35,7 @@ class AdvisorPackage:
     model_count: int
     combined_from_count: int
     selected_upgrade_ids: list[int]
+    selected_upgrade_selections: list[dict[str, int]]
     upgrade_labels: list[str]
     points: int
     quality: int
@@ -35,9 +45,13 @@ class AdvisorPackage:
     ev_infantry: float
     ev_elite: float
     ev_monster: float
+    burst_ev_infantry: float
+    burst_ev_elite: float
+    burst_ev_monster: float
     ranged_ev_infantry: float
     melee_ev_infantry: float
     wounds_per_100pts_infantry: float
+    limited_weapon_names: tuple[str, ...]
     role_tags: tuple[str, ...]
     aura_rules: tuple[str, ...]
     caster_level: str
@@ -54,6 +68,7 @@ def build_advisor_packages(faction_id: int, point_limit: int) -> list[AdvisorPac
         .order_by("name", "id")
     )
     packages: list[AdvisorPackage] = []
+    seen_package_keys: set[tuple[int, tuple[tuple[int, int], ...]]] = set()
     spell_role_tags = _faction_spell_role_tags(faction_id)
     for unit in units:
         packages.extend(
@@ -63,18 +78,40 @@ def build_advisor_packages(faction_id: int, point_limit: int) -> list[AdvisorPac
                 spell_role_tags=spell_role_tags,
             )
         )
-        for option in _upgrade_options(unit):
-            if option.cost <= 0:
+        seen_package_keys.add((unit.id, ()))
+        upgrade_options = [option for option in _upgrade_options(unit) if option.cost > 0]
+        replace_any_options = [option for option in upgrade_options if _is_replace_any_section(option.section)]
+        normal_options = [option for option in upgrade_options if not _is_replace_any_section(option.section)]
+        upgrade_selections = [
+            *([option] for option in normal_options),
+            *_upgrade_option_combinations(_advisor_relevant_upgrade_options(normal_options)),
+        ]
+        replace_any_selections = [
+            ([option], {option.id: target_count})
+            for option in replace_any_options
+            if (target_count := _replace_any_target_count(unit, option.section)) > 0
+        ]
+        for selection, quantities in [
+            *((selection, None) for selection in upgrade_selections),
+            *replace_any_selections,
+        ]:
+            package_data = _resolved_upgrade_package_data(unit, selection, quantities_by_option=quantities)
+            if package_data is None:
                 continue
+            package_key = (unit.id, _selection_key(package_data["selected_upgrade_selections"]))
+            if package_key in seen_package_keys:
+                continue
+            seen_package_keys.add(package_key)
             packages.extend(
                 _packages_for_unit_variant(
                     unit=unit,
                     point_limit=point_limit,
                     spell_role_tags=spell_role_tags,
-                    selected_upgrade_ids=[option.id],
-                    upgrade_labels=[option.label],
-                    package_suffix=f"o{option.id}",
-                    upgrade_cost=option.cost,
+                    selected_upgrade_ids=package_data["selected_upgrade_ids"],
+                    selected_upgrade_selections=package_data["selected_upgrade_selections"],
+                    upgrade_labels=package_data["upgrade_labels"],
+                    package_suffix=_upgrade_package_suffix(package_data["selected_upgrade_ids"]),
+                    upgrade_cost=package_data["upgrade_cost"],
                 )
             )
     return packages
@@ -82,14 +119,14 @@ def build_advisor_packages(faction_id: int, point_limit: int) -> list[AdvisorPac
 
 def build_package_table(packages: list[AdvisorPackage]) -> str:
     lines = [
-        "| Package | Unit | Pts | Models | Combined | Q | Def | T | AP | Act_inf | Rng_inf | Mel_inf | Act_eli | Act_mon | W100 | Upgrades | Roles | Caster | Spell Roles | Aura | Embed | Legal |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| Package | Unit | Pts | Models | Combined | Q | Def | T | AP | Act_inf | Burst_inf | Rng_inf | Mel_inf | Act_eli | Act_mon | W100 | Limited | Upgrades | Roles | Caster | Spell Roles | Aura | Embed | Legal |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for package in packages:
         lines.append(
             "| {package_id} | {unit} | {points} | {models} | {combined} | {quality}+ | {defense}+ | "
-            "{tough} | {ap} | {ev_inf:.2f} | {rng_inf:.2f} | {mel_inf:.2f} | {ev_eli:.2f} | {ev_mon:.2f} | {w100:.2f} | "
-            "{upgrades} | {roles} | {caster} | {spell_roles} | {aura} | {embed} | {legal} |".format(
+            "{tough} | {ap} | {ev_inf:.2f} | {burst_inf:.2f} | {rng_inf:.2f} | {mel_inf:.2f} | {ev_eli:.2f} | {ev_mon:.2f} | {w100:.2f} | "
+            "{limited} | {upgrades} | {roles} | {caster} | {spell_roles} | {aura} | {embed} | {legal} |".format(
                 package_id=package.package_id,
                 unit=_compact(package.unit_name, 36),
                 points=package.points,
@@ -100,11 +137,13 @@ def build_package_table(packages: list[AdvisorPackage]) -> str:
                 tough=package.tough,
                 ap=package.max_ap,
                 ev_inf=package.ev_infantry,
+                burst_inf=package.burst_ev_infantry,
                 rng_inf=package.ranged_ev_infantry,
                 mel_inf=package.melee_ev_infantry,
                 ev_eli=package.ev_elite,
                 ev_mon=package.ev_monster,
                 w100=package.wounds_per_100pts_infantry,
+                limited=_compact(", ".join(package.limited_weapon_names), 48) if package.limited_weapon_names else "-",
                 upgrades=_compact(", ".join(package.upgrade_labels), 60) if package.upgrade_labels else "-",
                 roles=", ".join(package.role_tags),
                 caster=package.caster_level or "-",
@@ -165,6 +204,7 @@ def package_lookup(packages: list[AdvisorPackage]) -> dict[str, dict[str, Any]]:
             "model_count": package.model_count,
             "combined_from_count": package.combined_from_count,
             "selected_upgrade_ids": package.selected_upgrade_ids,
+            "selected_upgrade_selections": package.selected_upgrade_selections,
         }
         for package in packages
     }
@@ -212,6 +252,7 @@ def _package_for_unit(
     point_limit: int,
     spell_role_tags: tuple[str, ...] = (),
     selected_upgrade_ids: list[int] | None = None,
+    selected_upgrade_selections: list[dict[str, int]] | None = None,
     upgrade_labels: list[str] | None = None,
     package_suffix: str = "base",
     upgrade_cost: int = 0,
@@ -224,9 +265,10 @@ def _package_for_unit(
         upgrade_cost=upgrade_cost,
         combined_count=combined_from_count,
     )
-    caster_level = _caster_level(unit.special_rules)
     selected_ids = selected_upgrade_ids or []
-    weapons, extra_rules = _variant_weapons_and_rules(unit, selected_ids)
+    selected_selections = selected_upgrade_selections or _selected_upgrade_selections_from_ids(selected_ids)
+    weapons, extra_rules = _variant_weapons_and_rules(unit, selected_ids, selected_selections)
+    caster_level = _caster_level({**(unit.special_rules or {}), **extra_rules})
     target_results = _target_scores(unit, model_count, points, combined_from_count, weapons, extra_rules)
     return AdvisorPackage(
         package_id=_package_id(unit.id, package_suffix, combined_from_count),
@@ -235,6 +277,7 @@ def _package_for_unit(
         model_count=model_count,
         combined_from_count=combined_from_count,
         selected_upgrade_ids=selected_upgrade_ids or [],
+        selected_upgrade_selections=selected_selections,
         upgrade_labels=upgrade_labels or [],
         points=points,
         quality=unit.quality,
@@ -244,9 +287,15 @@ def _package_for_unit(
         ev_infantry=target_results["infantry"]["ev"],
         ev_elite=target_results["elite"]["ev"],
         ev_monster=target_results["monster"]["ev"],
+        burst_ev_infantry=target_results["infantry"]["burst_ev"],
+        burst_ev_elite=target_results["elite"]["burst_ev"],
+        burst_ev_monster=target_results["monster"]["burst_ev"],
         ranged_ev_infantry=target_results["infantry"]["ranged_ev"],
         melee_ev_infantry=target_results["infantry"]["melee_ev"],
         wounds_per_100pts_infantry=target_results["infantry"]["wounds_per_100_points"],
+        limited_weapon_names=tuple(
+            weapon.name for weapon in weapons if weapon_has_limited_rule(weapon)
+        ),
         role_tags=_role_tags(unit, points, point_limit, caster_level, weapons, extra_rules),
         aura_rules=_aura_rules(unit, selected_upgrade_ids or []),
         caster_level=caster_level,
@@ -263,6 +312,7 @@ def _packages_for_unit_variant(
     point_limit: int,
     spell_role_tags: tuple[str, ...],
     selected_upgrade_ids: list[int] | None = None,
+    selected_upgrade_selections: list[dict[str, int]] | None = None,
     upgrade_labels: list[str] | None = None,
     package_suffix: str = "base",
     upgrade_cost: int = 0,
@@ -272,6 +322,7 @@ def _packages_for_unit_variant(
         point_limit=point_limit,
         spell_role_tags=spell_role_tags,
         selected_upgrade_ids=selected_upgrade_ids,
+        selected_upgrade_selections=selected_upgrade_selections,
         upgrade_labels=upgrade_labels,
         package_suffix=package_suffix,
         upgrade_cost=upgrade_cost,
@@ -287,6 +338,7 @@ def _packages_for_unit_variant(
             point_limit=point_limit,
             spell_role_tags=spell_role_tags,
             selected_upgrade_ids=selected_upgrade_ids,
+            selected_upgrade_selections=selected_upgrade_selections,
             upgrade_labels=upgrade_labels,
             package_suffix=package_suffix,
             upgrade_cost=upgrade_cost,
@@ -309,6 +361,119 @@ def _package_id(unit_id: int, package_suffix: str, combined_from_count: int) -> 
     if combined_from_count <= 1:
         return base_id
     return f"{base_id}-c{combined_from_count}"
+
+
+def _upgrade_package_suffix(option_ids: list[int]) -> str:
+    return "o" + "-".join(str(option_id) for option_id in option_ids)
+
+
+def _resolved_upgrade_package_data(
+    unit: Unit,
+    selected_options: list[UnitUpgradeOption],
+    *,
+    quantities_by_option: dict[int, int] | None = None,
+) -> dict[str, Any] | None:
+    resolution = resolve_unit_upgrade_options(unit, selected_options)
+    if not resolution.is_valid:
+        return None
+    quantities = quantities_by_option or {}
+    selections = [
+        {"option": option.id, "quantity": max(1, int(quantities.get(option.id, 1)))}
+        for option in resolution.options
+    ]
+    return {
+        "selected_upgrade_ids": resolution.option_ids,
+        "selected_upgrade_selections": selections,
+        "upgrade_labels": [
+            _upgrade_label(option, _quantity_for_option(option.id, selections))
+            for option in resolution.options
+        ],
+        "upgrade_cost": sum(option.cost * _quantity_for_option(option.id, selections) for option in resolution.options),
+    }
+
+
+def _upgrade_label(option: UnitUpgradeOption, quantity: int) -> str:
+    return f"{option.label} x{quantity}" if quantity > 1 else option.label
+
+
+def _quantity_for_option(option_id: int, selections: list[dict[str, int]]) -> int:
+    for selection in selections:
+        if selection["option"] == option_id:
+            return max(1, int(selection.get("quantity", 1)))
+    return 1
+
+
+def _selection_key(selections: list[dict[str, int]]) -> tuple[tuple[int, int], ...]:
+    return tuple((selection["option"], max(1, int(selection.get("quantity", 1)))) for selection in selections)
+
+
+def _advisor_relevant_upgrade_options(options: list[UnitUpgradeOption]) -> list[UnitUpgradeOption]:
+    return [option for option in options if _upgrade_option_is_advisor_relevant(option)]
+
+
+def _upgrade_option_combinations(
+    options: list[UnitUpgradeOption],
+    *,
+    max_selected: int = 2,
+) -> list[list[UnitUpgradeOption]]:
+    selections: list[list[UnitUpgradeOption]] = []
+    for size in range(2, max_selected + 1):
+        for selected in combinations(options, size):
+            if _has_conflicting_upgrade_sections(list(selected)):
+                continue
+            selections.append(list(selected))
+    return selections
+
+
+def _has_conflicting_upgrade_sections(options: list[UnitUpgradeOption]) -> bool:
+    seen_section_ids: set[int] = set()
+    for option in options:
+        if option.section_id in seen_section_ids and not _is_replace_any_section(option.section):
+            return True
+        seen_section_ids.add(option.section_id)
+    return False
+
+
+def _upgrade_option_is_advisor_relevant(option: UnitUpgradeOption) -> bool:
+    if option.weapons.exists():
+        return True
+    return bool(_advisor_relevant_gain_rules(option.gains))
+
+
+def _advisor_relevant_gain_rules(gains: list[dict[str, Any]]) -> tuple[str, ...]:
+    relevant_rules = {
+        "ambush",
+        "ap",
+        "caster",
+        "caster group",
+        "deadly",
+        "defense",
+        "disintegrate",
+        "fast",
+        "fearless",
+        "flying",
+        "furious",
+        "impact",
+        "melee slayer",
+        "poison",
+        "ranged slayer",
+        "regeneration",
+        "reliable",
+        "rending",
+        "scout",
+        "sergeant",
+        "stealth",
+        "strider",
+        "support",
+        "surge",
+        "tough",
+        "unstoppable",
+    }
+    return tuple(
+        rule
+        for rule, _rating in _gain_rules(gains)
+        if rule.strip().lower() in relevant_rules or "aura" in rule.strip().lower()
+    )
 
 
 def _upgrade_options(unit: Unit) -> list[UnitUpgradeOption]:
@@ -358,29 +523,39 @@ def _target_score(
     ev = 0.0
     ranged_ev = 0.0
     melee_ev = 0.0
+    burst_ev = 0.0
+    burst_ranged_ev = 0.0
+    burst_melee_ev = 0.0
     for weapon in weapons:
-        attacks = weapon.attacks * model_count * max(1, combined_from_count)
+        attacks = weapon.attacks * weapon_attack_count(weapon, model_count) * max(1, combined_from_count)
         special_rules = {**unit.special_rules, **extra_rules, **weapon.special_rules}
-        weapon_ev = calculate_ev(
-            attacks,
-            unit.quality,
-            target.defense,
-            weapon.ap,
-            special_rules,
+        weapon_profile = weapon_ev_profile(
+            weapon=weapon,
+            attacks=attacks,
+            quality=unit.quality,
+            defense=target.defense,
+            special_rules=special_rules,
             target_special_rules=target.special_rules,
             combat_context=weapon_combat_context(weapon, model_count, target.tough, target.unit_size),
         )
-        ev += weapon_ev
+        ev += weapon_profile.sustained_ev
+        burst_ev += weapon_profile.burst_ev
         if weapon.range > 0:
-            ranged_ev += weapon_ev
+            ranged_ev += weapon_profile.sustained_ev
+            burst_ranged_ev += weapon_profile.burst_ev
         else:
-            melee_ev += weapon_ev
+            melee_ev += weapon_profile.sustained_ev
+            burst_melee_ev += weapon_profile.burst_ev
     activation_ev = max(ranged_ev, melee_ev)
     return {
         "ev": round(activation_ev, 6),
         "summed_ev": round(ev, 6),
         "ranged_ev": round(ranged_ev, 6),
         "melee_ev": round(melee_ev, 6),
+        "burst_ev": round(max(burst_ranged_ev, burst_melee_ev), 6),
+        "burst_summed_ev": round(burst_ev, 6),
+        "burst_ranged_ev": round(burst_ranged_ev, 6),
+        "burst_melee_ev": round(burst_melee_ev, 6),
         "wounds_per_100_points": round((activation_ev / points) * 100, 6) if points > 0 else 0,
     }
 
@@ -398,7 +573,7 @@ def _role_tags(
     combined_rules = {**(unit.special_rules or {}), **(extra_rules or {})}
     ranged_ev = _lane_ev(unit, weapons, combined_rules, ranged=True)
     melee_ev = _lane_ev(unit, weapons, combined_rules, ranged=False)
-    if _has_any_rule(unit, ("Scout", "Fast", "Flying", "Strider", "Ambush")):
+    if _has_any_rule_from(combined_rules, ("Scout", "Fast", "Flying", "Strider", "Ambush")):
         tags.append("mobility")
     if any(weapon.range > 0 for weapon in weapons):
         tags.append("ranged")
@@ -422,9 +597,9 @@ def _role_tags(
         tags.append("anti-tough")
     if point_limit > 0 and points <= point_limit * 0.12:
         tags.append("screen")
-    if _has_any_rule(unit, ("Fearless", "Stealth", "Regeneration")):
+    if _has_any_rule_from(combined_rules, ("Fearless", "Stealth", "Regeneration")):
         tags.append("support")
-    if _has_any_rule(unit, ("Fearless",)):
+    if _has_any_rule_from(combined_rules, ("Fearless",)):
         tags.append("morale")
     if caster_level:
         tags.extend(("caster", "support"))
@@ -519,10 +694,8 @@ def spell_role_tags(effect: str) -> tuple[str, ...]:
 def _aura_rules(unit: Unit, selected_upgrade_ids: list[int]) -> tuple[str, ...]:
     _normal_rules, unit_aura_rules = split_aura_rules(unit.special_rules)
     aura_rules = list(unit_aura_rules)
-    selected = set(selected_upgrade_ids)
-    for option in _upgrade_options(unit):
-        if option.id in selected:
-            aura_rules.extend(aura_rule_names_from_gains(option.gains))
+    for option in _resolved_upgrade_options(unit, selected_upgrade_ids):
+        aura_rules.extend(aura_rule_names_from_gains(option.gains))
     return tuple(dict.fromkeys(aura_rules))
 
 
@@ -545,25 +718,98 @@ def _has_any_rule(unit: Unit, names: tuple[str, ...]) -> bool:
     return any(name.lower() in normalized for name in names)
 
 
-def _variant_weapons_and_rules(unit: Unit, selected_upgrade_ids: list[int] | None = None) -> tuple[list[Any], dict[str, Any]]:
-    weapons = [slot.weapon for slot in unit.weapon_slots.all() if slot.is_default]
+def _variant_weapons_and_rules(
+    unit: Unit,
+    selected_upgrade_ids: list[int] | None = None,
+    selected_upgrade_selections: list[dict[str, int]] | None = None,
+) -> tuple[list[Any], dict[str, Any]]:
+    weapons = [weapon_with_count(slot.weapon, slot.count) for slot in unit.weapon_slots.all() if slot.is_default]
     if not weapons:
-        weapons = [slot.weapon for slot in unit.weapon_slots.all()[:1]]
+        weapons = [weapon_with_count(slot.weapon, slot.count) for slot in unit.weapon_slots.all()[:1]]
     extra_rules: dict[str, Any] = {}
     selected = set(selected_upgrade_ids or [])
     if not selected:
         return weapons, extra_rules
 
-    for option in _upgrade_options(unit):
-        if option.id not in selected:
-            continue
+    quantities = {
+        int(selection["option"]): max(1, int(selection.get("quantity", 1)))
+        for selection in selected_upgrade_selections or []
+        if selection.get("option") is not None
+    }
+    for option in _resolved_upgrade_options(unit, selected_upgrade_ids or []):
+        option_quantity = quantities.get(option.id, 1)
         if option.section.variant.lower() == "replace":
-            targets = {str(target).lower() for target in option.section.targets}
-            weapons = [weapon for weapon in weapons if weapon.name.lower() not in targets]
-        weapons = [*weapons, *option.weapons.all()]
+            quantity = option_quantity if _is_replace_any_section(option.section) else None
+            weapons = _remove_target_weapons(weapons, option.section.targets, quantity=quantity)
+        weapons = [*weapons, *_option_weapons(option, option_quantity)]
         gained_rules, _aura_rules = split_aura_rules(dict(_gain_rules(option.gains)))
         extra_rules = {**extra_rules, **gained_rules}
     return weapons, extra_rules
+
+
+def _option_weapons(option: UnitUpgradeOption, quantity: int = 1) -> list[Any]:
+    links = list(option.option_weapons.select_related("weapon").all())
+    if links:
+        return [
+            weapon_with_count(link.weapon, link.count * quantity if link.count else None)
+            for link in links
+        ]
+    return [weapon_with_count(weapon, quantity) for weapon in option.weapons.all()]
+
+
+def _remove_target_weapons(
+    weapons: list[Any],
+    targets: list[str],
+    *,
+    quantity: int | None,
+) -> list[Any]:
+    if quantity is None:
+        return [
+            weapon
+            for weapon in weapons
+            if not weapon_matches_upgrade_target(weapon.name, targets)
+        ]
+    remaining = quantity
+    kept: list[Any] = []
+    for weapon in weapons:
+        if remaining <= 0 or not weapon_matches_upgrade_target(weapon.name, targets):
+            kept.append(weapon)
+            continue
+        count = weapon_count(weapon)
+        if count is None:
+            remaining -= 1
+            continue
+        removed = min(count, remaining)
+        remaining -= removed
+        if count > removed:
+            kept.append(weapon_with_count(weapon, count - removed))
+    return kept
+
+
+def _is_replace_any_section(section: Any) -> bool:
+    affects = getattr(section, "affects", None) or {}
+    return section.variant.lower() == "replace" and str(affects.get("type") or "").lower() == "any"
+
+
+def _replace_any_target_count(unit: Unit, section: Any) -> int:
+    count = 0
+    for slot in unit.weapon_slots.all():
+        if not slot.is_default or not weapon_matches_upgrade_target(slot.weapon.name, section.targets):
+            continue
+        count += slot.count or 1
+    return count
+
+
+def _selected_upgrade_selections_from_ids(option_ids: list[int]) -> list[dict[str, int]]:
+    return [{"option": option_id, "quantity": 1} for option_id in option_ids]
+
+
+def _resolved_upgrade_options(unit: Unit, selected_upgrade_ids: list[int]) -> list[UnitUpgradeOption]:
+    selected_options = [option for option in _upgrade_options(unit) if option.id in set(selected_upgrade_ids)]
+    option_order = {option_id: index for index, option_id in enumerate(selected_upgrade_ids)}
+    selected_options = sorted(selected_options, key=lambda option: option_order[option.id])
+    resolution = resolve_unit_upgrade_options(unit, selected_options)
+    return resolution.options if resolution.is_valid else selected_options
 
 
 def _gain_rules(gains: list[dict[str, Any]]):
@@ -587,17 +833,17 @@ def _lane_ev(unit: Unit, weapons: list[Any], extra_rules: dict[str, Any], *, ran
     for weapon in weapons:
         if (weapon.range > 0) != ranged:
             continue
-        attacks = weapon.attacks * _default_model_count(unit)
+        attacks = weapon.attacks * weapon_attack_count(weapon, _default_model_count(unit))
         special_rules = {**(unit.special_rules or {}), **extra_rules, **(weapon.special_rules or {})}
-        ev += calculate_ev(
-            attacks,
-            unit.quality,
-            target.defense,
-            weapon.ap,
-            special_rules,
+        ev += weapon_ev_profile(
+            weapon=weapon,
+            attacks=attacks,
+            quality=unit.quality,
+            defense=target.defense,
+            special_rules=special_rules,
             target_special_rules=target.special_rules,
             combat_context=weapon_combat_context(weapon, _default_model_count(unit), target.tough, target.unit_size),
-        )
+        ).sustained_ev
     return ev
 
 

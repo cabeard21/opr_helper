@@ -39,7 +39,7 @@ class UnitWeaponSlotSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = UnitWeaponSlot
-        fields = ("id", "weapon", "is_default", "upgrade_cost", "option_id", "upgrade_id")
+        fields = ("id", "weapon", "is_default", "count", "upgrade_cost", "option_id", "upgrade_id")
 
 
 class UnitUpgradeOptionSerializer(serializers.ModelSerializer):
@@ -55,7 +55,7 @@ class UnitUpgradeSectionSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = UnitUpgradeSection
-        fields = ("id", "package_uid", "section_uid", "label", "variant", "targets", "options")
+        fields = ("id", "package_uid", "section_uid", "label", "variant", "targets", "affects", "options")
 
 
 class UnitSerializer(serializers.ModelSerializer):

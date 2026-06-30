@@ -3,8 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from army_books.calc.engine import calculate_distribution, calculate_ev
-from lists.loadouts import EffectiveLoadout, effective_loadout, split_aura_rules
+from army_books.calc.engine import calculate_distribution
+from army_books.calc.weapon_scoring import weapon_ev_profile, weapon_has_limited_rule
+from lists.loadouts import EffectiveLoadout, effective_loadout, split_aura_rules, weapon_attack_count
 from lists.models import ArmyList, ListUnit
 from lists.validation import list_unit_points
 
@@ -170,6 +171,9 @@ def _analyze_list_unit(
         "weapon_id": loadout.weapons[0].id,
         "weapon_name": loadout.summary,
         "weapon_names": loadout.weapon_names,
+        "limited_weapon_names": [
+            weapon.name for weapon in loadout.weapons if weapon_has_limited_rule(weapon)
+        ],
         "target_results": target_results,
     }
 
@@ -244,25 +248,31 @@ def _target_result(
     ev = 0.0
     ranged_ev = 0.0
     melee_ev = 0.0
+    burst_ev = 0.0
+    burst_ranged_ev = 0.0
+    burst_melee_ev = 0.0
     p_kill_model = 0.0
     for weapon in weapons:
-        attacks = weapon.attacks * entry.model_count
+        attacks = weapon.attacks * weapon_attack_count(weapon, entry.model_count)
         special_rules = {**extra_rules, **weapon.special_rules}
         combat_context = weapon_combat_context(weapon, entry.model_count, target.tough, target.unit_size)
-        weapon_ev = calculate_ev(
-            attacks,
-            entry.unit.quality,
-            target.defense,
-            weapon.ap,
-            special_rules,
+        weapon_profile = weapon_ev_profile(
+            weapon=weapon,
+            attacks=attacks,
+            quality=entry.unit.quality,
+            defense=target.defense,
+            special_rules=special_rules,
             target_special_rules=target.special_rules,
             combat_context=combat_context,
         )
-        ev += weapon_ev
+        ev += weapon_profile.sustained_ev
+        burst_ev += weapon_profile.burst_ev
         if weapon.range > 0:
-            ranged_ev += weapon_ev
+            ranged_ev += weapon_profile.sustained_ev
+            burst_ranged_ev += weapon_profile.burst_ev
         else:
-            melee_ev += weapon_ev
+            melee_ev += weapon_profile.sustained_ev
+            burst_melee_ev += weapon_profile.burst_ev
         distribution = calculate_distribution(
             attacks,
             entry.unit.quality,
@@ -284,6 +294,10 @@ def _target_result(
         "ranged_ev": round(ranged_ev, 6),
         "melee_ev": round(melee_ev, 6),
         "activation_ev": round(max(ranged_ev, melee_ev), 6),
+        "burst_ev": round(burst_ev, 6),
+        "burst_ranged_ev": round(burst_ranged_ev, 6),
+        "burst_melee_ev": round(burst_melee_ev, 6),
+        "burst_activation_ev": round(max(burst_ranged_ev, burst_melee_ev), 6),
         "wounds_per_100_points": round((ev / points) * 100, 6) if points > 0 else 0,
         "ranged_wounds_per_100_points": round((ranged_ev / points) * 100, 6) if points > 0 else 0,
         "melee_wounds_per_100_points": round((melee_ev / points) * 100, 6) if points > 0 else 0,
@@ -302,6 +316,10 @@ def _total_for_target(
     ranged_ev = 0.0
     melee_ev = 0.0
     activation_ev = 0.0
+    burst_ev = 0.0
+    burst_ranged_ev = 0.0
+    burst_melee_ev = 0.0
+    burst_activation_ev = 0.0
     points = 0
     for unit_result in unit_results:
         if unit_result is None:
@@ -314,6 +332,10 @@ def _total_for_target(
         ranged_ev += float(target_result["ranged_ev"])
         melee_ev += float(target_result["melee_ev"])
         activation_ev += float(target_result["activation_ev"])
+        burst_ev += float(target_result["burst_ev"])
+        burst_ranged_ev += float(target_result["burst_ranged_ev"])
+        burst_melee_ev += float(target_result["burst_melee_ev"])
+        burst_activation_ev += float(target_result["burst_activation_ev"])
 
     return {
         "target_id": target.id,
@@ -321,6 +343,10 @@ def _total_for_target(
         "ranged_ev": round(ranged_ev, 6),
         "melee_ev": round(melee_ev, 6),
         "activation_ev": round(activation_ev, 6),
+        "burst_ev": round(burst_ev, 6),
+        "burst_ranged_ev": round(burst_ranged_ev, 6),
+        "burst_melee_ev": round(burst_melee_ev, 6),
+        "burst_activation_ev": round(burst_activation_ev, 6),
         "wounds_per_100_points": round((ev / points) * 100, 6) if points > 0 else 0,
         "ranged_wounds_per_100_points": round((ranged_ev / points) * 100, 6) if points > 0 else 0,
         "melee_wounds_per_100_points": round((melee_ev / points) * 100, 6) if points > 0 else 0,

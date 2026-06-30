@@ -267,6 +267,260 @@ class ListsApiTests(TestCase):
         )
         self.assertEqual(unit_payload["loadout_summary"], "Stomp + Twin Arm-Flamethrowers")
 
+    def test_selected_native_upgrade_replaces_plural_target_singular_weapon(self):
+        reavers = Unit.objects.create(
+            faction=self.faction,
+            name="War Gore Reavers",
+            quality=5,
+            defense=5,
+            tough=1,
+            points=100,
+        )
+        great_weapon = Weapon.objects.create(
+            name="Great Weapon",
+            range=0,
+            attacks=1,
+            attacks_string="A1",
+            ap=2,
+        )
+        dual_weapons = Weapon.objects.create(
+            name="Dual Hand Weapons",
+            range=0,
+            attacks=2,
+            attacks_string="A2",
+            ap=0,
+        )
+        UnitWeaponSlot.objects.create(unit=reavers, weapon=great_weapon, is_default=True)
+        section = UnitUpgradeSection.objects.create(
+            unit=reavers,
+            section_uid="war-gore-weapons",
+            label="Replace all Great Weapons",
+            variant="replace",
+            targets=["Great Weapons"],
+        )
+        option = UnitUpgradeOption.objects.create(
+            section=section,
+            option_uid="dual-hand-weapons",
+            label="Dual Hand Weapons (A2)",
+            cost=10,
+        )
+        UnitUpgradeOptionWeapon.objects.create(option=option, weapon=dual_weapons)
+        army_list = ArmyList.objects.create(
+            name="Tournament 750",
+            faction=self.faction,
+            point_limit=750,
+        )
+
+        response = self.client.post(
+            f"/api/lists/{army_list.id}/units/",
+            {
+                "unit": reavers.id,
+                "model_count": 1,
+                "selected_upgrades": [option.id],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        unit_payload = response.json()["data"]["units"][0]
+        self.assertEqual(unit_payload["total_points"], 110)
+        self.assertEqual(unit_payload["loadout_weapon_names"], ["Dual Hand Weapons"])
+        self.assertEqual(unit_payload["loadout_summary"], "Dual Hand Weapons")
+
+    def test_selected_native_upgrade_adds_prerequisite_upgrade_for_dependent_replace(self):
+        winged_wardens = Unit.objects.create(
+            faction=self.faction,
+            name="Winged Wardens",
+            quality=4,
+            defense=4,
+            tough=1,
+            points=100,
+        )
+        hand_weapon = Weapon.objects.create(
+            name="Hand Weapon",
+            range=0,
+            attacks=1,
+            attacks_string="A1",
+            ap=0,
+        )
+        javelin = Weapon.objects.create(
+            name="Javelin",
+            range=12,
+            attacks=1,
+            attacks_string="A1",
+            ap=0,
+        )
+        storm_trident_weapon = Weapon.objects.create(
+            name="Storm Trident",
+            range=18,
+            attacks=1,
+            attacks_string="A1",
+            ap=2,
+        )
+        UnitWeaponSlot.objects.create(unit=winged_wardens, weapon=hand_weapon, is_default=True)
+        javelin_section = UnitUpgradeSection.objects.create(
+            unit=winged_wardens,
+            section_uid="winged-warden-javelins",
+            label="Take Javelins",
+            variant="upgrade",
+        )
+        javelins = UnitUpgradeOption.objects.create(
+            section=javelin_section,
+            option_uid="javelins",
+            label="Javelins",
+            cost=10,
+        )
+        UnitUpgradeOptionWeapon.objects.create(option=javelins, weapon=javelin)
+        trident_section = UnitUpgradeSection.objects.create(
+            unit=winged_wardens,
+            section_uid="winged-warden-trident",
+            label="Replace one Javelin",
+            variant="replace",
+            targets=["Javelins"],
+        )
+        storm_trident = UnitUpgradeOption.objects.create(
+            section=trident_section,
+            option_uid="storm-trident",
+            label="Storm Trident",
+            cost=15,
+        )
+        UnitUpgradeOptionWeapon.objects.create(option=storm_trident, weapon=storm_trident_weapon)
+        army_list = ArmyList.objects.create(
+            name="Tournament 750",
+            faction=self.faction,
+            point_limit=750,
+        )
+
+        response = self.client.post(
+            f"/api/lists/{army_list.id}/units/",
+            {
+                "unit": winged_wardens.id,
+                "model_count": 1,
+                "selected_upgrades": [storm_trident.id],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        unit_payload = response.json()["data"]["units"][0]
+        self.assertEqual(unit_payload["selected_upgrades"], [javelins.id, storm_trident.id])
+        self.assertEqual(unit_payload["total_points"], 125)
+        self.assertEqual(unit_payload["loadout_weapon_names"], ["Hand Weapon", "Storm Trident"])
+        self.assertEqual(unit_payload["loadout_summary"], "Hand Weapon + Storm Trident")
+
+    def test_replace_any_upgrade_replaces_one_matching_weapon_count(self):
+        weapon_teams = Unit.objects.create(
+            faction=self.faction,
+            name="Weapon Teams",
+            quality=5,
+            defense=5,
+            tough=3,
+            points=110,
+            min_models=3,
+            default_models=3,
+            max_models=3,
+        )
+        crew = Weapon.objects.create(name="Crew", range=0, attacks=1, attacks_string="A1")
+        heavy_drill = Weapon.objects.create(
+            name="Heavy Drill",
+            range=0,
+            attacks=1,
+            attacks_string="A1",
+            ap=4,
+            special_rules={"Deadly": 3},
+        )
+        gatling = Weapon.objects.create(
+            name="Gatling Gun",
+            range=18,
+            attacks=4,
+            attacks_string="A4",
+            ap=1,
+        )
+        UnitWeaponSlot.objects.create(unit=weapon_teams, weapon=crew, is_default=True, count=3)
+        UnitWeaponSlot.objects.create(unit=weapon_teams, weapon=heavy_drill, is_default=True, count=3)
+        section = UnitUpgradeSection.objects.create(
+            unit=weapon_teams,
+            section_uid="weapon-team-drills",
+            label="Replace any Heavy Drill",
+            variant="replace",
+            targets=["Heavy Drill"],
+            affects={"type": "any"},
+        )
+        option = UnitUpgradeOption.objects.create(
+            section=section,
+            option_uid="gatling-gun",
+            label='Gatling Gun (18", A4, AP(1))',
+            cost=5,
+        )
+        UnitUpgradeOptionWeapon.objects.create(option=option, weapon=gatling, count=1)
+        army_list = ArmyList.objects.create(
+            name="Tournament 750",
+            faction=self.faction,
+            point_limit=750,
+        )
+
+        response = self.client.post(
+            f"/api/lists/{army_list.id}/units/",
+            {
+                "unit": weapon_teams.id,
+                "model_count": 3,
+                "selected_upgrade_selections": [{"option": option.id, "quantity": 1}],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        unit_payload = response.json()["data"]["units"][0]
+        self.assertEqual(unit_payload["selected_upgrades"], [option.id])
+        self.assertEqual(
+            unit_payload["selected_upgrade_selections"],
+            [{"option": option.id, "quantity": 1}],
+        )
+        self.assertEqual(unit_payload["total_points"], 115)
+        self.assertEqual(unit_payload["loadout_weapon_names"], ["Crew", "Heavy Drill", "Gatling Gun"])
+        self.assertEqual(unit_payload["loadout_summary"], "Crew x3 + Heavy Drill x2 + Gatling Gun")
+
+    def test_list_validation_flags_replace_any_quantity_over_target_count(self):
+        weapon_teams = Unit.objects.create(
+            faction=self.faction,
+            name="Weapon Teams",
+            quality=5,
+            defense=5,
+            tough=3,
+            points=110,
+            min_models=3,
+            default_models=3,
+            max_models=3,
+        )
+        heavy_drill = Weapon.objects.create(name="Heavy Drill", range=0, attacks=1, attacks_string="A1")
+        gatling = Weapon.objects.create(name="Gatling Gun", range=18, attacks=4, attacks_string="A4", ap=1)
+        UnitWeaponSlot.objects.create(unit=weapon_teams, weapon=heavy_drill, is_default=True, count=3)
+        section = UnitUpgradeSection.objects.create(
+            unit=weapon_teams,
+            section_uid="weapon-team-drills",
+            label="Replace any Heavy Drill",
+            variant="replace",
+            targets=["Heavy Drill"],
+            affects={"type": "any"},
+        )
+        option = UnitUpgradeOption.objects.create(
+            section=section,
+            option_uid="gatling-gun",
+            label='Gatling Gun (18", A4, AP(1))',
+            cost=5,
+        )
+        UnitUpgradeOptionWeapon.objects.create(option=option, weapon=gatling, count=1)
+        army_list = ArmyList.objects.create(name="Tournament 750", faction=self.faction, point_limit=750)
+        entry = ListUnit.objects.create(army_list=army_list, unit=weapon_teams, model_count=3)
+        ListUnitUpgrade.objects.create(list_unit=entry, option=option, quantity=4)
+
+        response = self.client.get(f"/api/lists/{army_list.id}/")
+
+        self.assertEqual(response.status_code, 200)
+        validation = response.json()["data"]["validation"]
+        self.assertEqual(validation["errors"][0]["code"], "invalid_selected_upgrades")
+        self.assertIn("can replace at most 3 matching weapons", validation["errors"][0]["message"])
+
     def test_default_multi_weapon_loadout_is_preserved(self):
         army_list = ArmyList.objects.create(
             name="Tournament 2000",
@@ -1039,6 +1293,46 @@ class ListsApiTests(TestCase):
         self.assertEqual(response.json()["data"]["totals"][0]["ranged_ev"], 0.833333)
         self.assertEqual(response.json()["data"]["totals"][0]["melee_ev"], 0.5)
         self.assertEqual(response.json()["data"]["totals"][0]["activation_ev"], 0.833333)
+
+    def test_analyze_list_discounts_limited_weapon_sustained_ev_but_surfaces_burst(self):
+        self.flamer.special_rules = {**self.flamer.special_rules, "Limited": True}
+        self.flamer.save()
+        army_list = ArmyList.objects.create(
+            name="Tournament 2000",
+            faction=self.faction,
+            point_limit=2000,
+        )
+        entry = ListUnit.objects.create(
+            army_list=army_list,
+            unit=self.bull,
+            model_count=1,
+        )
+        ListUnitUpgrade.objects.create(list_unit=entry, option=self.bull_upgrade_option)
+
+        response = self.client.post(
+            f"/api/lists/{army_list.id}/analysis/",
+            {"targets": [{"id": "monster", "name": "Monster", "defense": 2, "tough": 10}]},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()["data"]
+        unit_result = payload["units"][0]
+        self.assertEqual(unit_result["limited_weapon_names"], ["Twin Arm-Flamethrowers"])
+        target_result = unit_result["target_results"][0]
+        self.assertEqual(target_result["ev"], 0.708333)
+        self.assertEqual(target_result["ranged_ev"], 0.208333)
+        self.assertEqual(target_result["melee_ev"], 0.5)
+        self.assertEqual(target_result["activation_ev"], 0.5)
+        self.assertEqual(target_result["burst_ev"], 1.333333)
+        self.assertEqual(target_result["burst_ranged_ev"], 0.833333)
+        self.assertEqual(target_result["burst_melee_ev"], 0.5)
+        self.assertEqual(target_result["burst_activation_ev"], 0.833333)
+        total_result = payload["totals"][0]
+        self.assertEqual(total_result["ev"], 0.708333)
+        self.assertEqual(total_result["burst_ev"], 1.333333)
+        self.assertEqual(total_result["activation_ev"], 0.5)
+        self.assertEqual(total_result["burst_activation_ev"], 0.833333)
 
     def test_analyze_list_default_monster_target_has_regeneration(self):
         army_list = ArmyList.objects.create(

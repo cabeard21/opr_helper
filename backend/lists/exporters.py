@@ -81,7 +81,7 @@ def _validate_exportable(army_list: ArmyList) -> None:
 
         selected_options = _selected_upgrade_options(entry)
         if selected_options:
-            for option in selected_options:
+            for option, _quantity in selected_options:
                 if not option.option_uid or not option.section.section_uid:
                     raise ArmyForgeExportError(
                         f"Army Forge export requires native upgrade IDs for {entry.unit.name}. "
@@ -143,14 +143,22 @@ def _join_to_unit(row: ExportRow) -> str | None:
 def _selected_upgrades(entry: ListUnit, row: ExportRow) -> list[dict[str, str]]:
     selected_options = _selected_upgrade_options(entry)
     if selected_options:
-        return [
-            {
-                "optionId": str(option.option_uid),
-                "upgradeId": str(option.section.section_uid),
-                "instanceId": _native_upgrade_instance_id(entry, option, row.copy_index),
-            }
-            for option in selected_options
-        ]
+        upgrades: list[dict[str, str]] = []
+        for option, quantity in selected_options:
+            for quantity_index in range(quantity):
+                upgrades.append(
+                    {
+                        "optionId": str(option.option_uid),
+                        "upgradeId": str(option.section.section_uid),
+                        "instanceId": _native_upgrade_instance_id(
+                            entry,
+                            option,
+                            row.copy_index,
+                            quantity_index,
+                        ),
+                    }
+                )
+        return upgrades
 
     slot = selected_or_default_slot(entry)
     if not slot or not _is_selected_upgrade(slot):
@@ -169,9 +177,9 @@ def _is_selected_upgrade(slot: UnitWeaponSlot) -> bool:
     return not slot.is_default or slot.upgrade_cost != 0 or bool(slot.option_id or slot.upgrade_id)
 
 
-def _selected_upgrade_options(entry: ListUnit) -> list[UnitUpgradeOption]:
+def _selected_upgrade_options(entry: ListUnit) -> list[tuple[UnitUpgradeOption, int]]:
     return [
-        selection.option
+        (selection.option, max(1, selection.quantity))
         for selection in entry.selected_upgrades.all()
         if selection.option.section.unit_id == entry.unit_id
     ]
@@ -201,8 +209,13 @@ def _upgrade_instance_id(entry: ListUnit, slot: UnitWeaponSlot, copy_index: int)
     return f"upg-{entry.id}-{slot.id}-{copy_index}"
 
 
-def _native_upgrade_instance_id(entry: ListUnit, option: UnitUpgradeOption, copy_index: int) -> str:
-    return f"upg-{entry.id}-{option.id}-{copy_index}"
+def _native_upgrade_instance_id(
+    entry: ListUnit,
+    option: UnitUpgradeOption,
+    copy_index: int,
+    quantity_index: int,
+) -> str:
+    return f"upg-{entry.id}-{option.id}-{copy_index}-{quantity_index}"
 
 
 def _format_timestamp(value) -> str:

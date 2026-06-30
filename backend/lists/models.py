@@ -73,6 +73,7 @@ class ListUnitUpgrade(models.Model):
         on_delete=models.CASCADE,
         related_name="list_unit_selections",
     )
+    quantity = models.PositiveIntegerField(default=1)
 
     class Meta:
         ordering = ("list_unit_id", "option__section__label", "option__label")

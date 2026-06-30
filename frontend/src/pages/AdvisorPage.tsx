@@ -4,6 +4,33 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { apiClient } from '../api/client'
 import type { AdvisorSuggestionResponse, Faction } from '../api/types'
 
+const LIST_STYLE_PROMPTS = [
+  {
+    title: 'Mobile objective pressure',
+    description: 'Higher activation count, fast scoring units, and enough threat to clear contested markers.',
+    prompt:
+      'Build a mobile objective pressure list with enough activations to trade onto objectives, fast scoring pieces, and just enough damage to remove common contesting units.',
+  },
+  {
+    title: 'Elite hammer',
+    description: 'Fewer durable threats, embedded support, and concentrated AP for forcing decisive fights.',
+    prompt:
+      'Build an elite hammer list with durable primary threats, embedded hero support where it matters, and high-AP damage for breaking tough enemy units.',
+  },
+  {
+    title: 'Balanced combined arms',
+    description: 'A stable mix of scoring bodies, ranged pressure, melee threat, anti-tough tools, and support.',
+    prompt:
+      'Build a balanced combined-arms list with scoring bodies, ranged pressure, melee counterpunch, anti-tough tools, and support pieces that cover common matchups.',
+  },
+  {
+    title: 'Beginner forgiving',
+    description: 'Simple roles, resilient units, fewer fragile tricks, and a clear plan for the first three rounds.',
+    prompt:
+      'Build a beginner-friendly list with straightforward unit roles, resilient choices, limited fragile combos, and a clear plan for playing the first three rounds.',
+  },
+] as const
+
 export function AdvisorPage() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
@@ -76,6 +103,10 @@ export function AdvisorPage() {
           Back to lists
         </Link>
         <h1 className="app-heading mt-2">Army advisor</h1>
+        <p className="app-muted mt-2 text-sm leading-6">
+          Choose a faction, then describe the job you want the army to do. The advisor can draft objective lists,
+          elite hammers, balanced forces, or beginner-friendly armies.
+        </p>
 
         {error ? <p className="app-alert-danger mt-4 text-sm">{error}</p> : null}
         {loading ? <p className="app-muted mt-4 text-sm">Loading factions...</p> : null}
@@ -114,7 +145,7 @@ export function AdvisorPage() {
         </label>
 
         <label className="app-label mt-4 block">
-          Goal
+          List goal
           <textarea
             className="app-field mt-1 min-h-36 w-full"
             maxLength={2000}
@@ -122,9 +153,37 @@ export function AdvisorPage() {
               setPrompt(event.target.value)
               setResult(null)
             }}
+            placeholder="Example: Build a mobile objective list with enough activations to contest late and enough AP to remove tough units."
             value={prompt}
           />
         </label>
+
+        <section className="mt-5" aria-labelledby="advisor-list-styles">
+          <h2 className="text-sm font-semibold" id="advisor-list-styles" style={{ color: 'var(--color-text)' }}>
+            List styles you can ask for
+          </h2>
+          <div className="mt-3 grid gap-3">
+            {LIST_STYLE_PROMPTS.map((style) => (
+              <button
+                className="rounded border p-3 text-left transition hover:-translate-y-0.5"
+                disabled={submitting !== null}
+                key={style.title}
+                onClick={() => {
+                  setPrompt(style.prompt)
+                  setResult(null)
+                }}
+                style={{ borderColor: 'var(--color-border)', background: 'var(--color-bg-soft)' }}
+                type="button"
+              >
+                <span className="block text-sm font-semibold" style={{ color: 'var(--color-text)' }}>
+                  {style.title}
+                </span>
+                <span className="app-muted mt-1 block text-xs leading-5">{style.description}</span>
+                <span className="sr-only">Use {style.title} prompt</span>
+              </button>
+            ))}
+          </div>
+        </section>
 
         <div className="mt-5 grid gap-2 sm:grid-cols-2">
           <button
@@ -164,12 +223,16 @@ function AdvisorPreview({
     return (
       <section className="app-card-lg">
         <h2 className="app-subheading">{selectedFaction?.name ?? 'Suggestion preview'}</h2>
-        <p className="app-muted mt-2 text-sm">No suggestion loaded yet.</p>
-        <div className="mt-4 flex flex-wrap gap-2">
-          {['Aggressive elite list', 'High activation objective play', 'Anti-tough damage', 'Beginner friendly'].map((example) => (
-            <span className="rounded border px-2 py-1 text-xs font-semibold" key={example} style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-muted)' }}>
-              {example}
-            </span>
+        <p className="app-muted mt-2 text-sm leading-6">
+          Preview a draft before creating it. The result will show the generated archetype, playstyle, unit roles,
+          warnings, activation shape, and how closely the suggestion fits the point limit.
+        </p>
+        <div className="mt-5 grid gap-3 sm:grid-cols-2">
+          {LIST_STYLE_PROMPTS.map((style) => (
+            <div className="rounded border px-3 py-2" key={style.title} style={{ borderColor: 'var(--color-border)' }}>
+              <p className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>{style.title}</p>
+              <p className="app-muted mt-1 text-xs leading-5">{style.description}</p>
+            </div>
           ))}
         </div>
       </section>

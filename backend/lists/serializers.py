@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
 from army_books.models import UnitUpgradeOption, UnitWeaponSlot
+from army_books.upgrade_resolution import resolve_unit_upgrade_options
 from lists.loadouts import effective_loadout
 from lists.models import ArmyList, ListUnit, ListUnitUpgrade
 from lists.validation import (
@@ -14,7 +15,12 @@ from lists.validation import (
 
 class SelectedUpgradesField(serializers.Field):
     def to_representation(self, value):
-        return [selection.option_id for selection in value.all()]
+        selections = list(value.all())
+        if not selections:
+            return []
+        options = [selection.option for selection in selections]
+        resolution = resolve_unit_upgrade_options(selections[0].list_unit.unit, options)
+        return resolution.option_ids if resolution.is_valid else [selection.option_id for selection in selections]
 
     def to_internal_value(self, data):
         if data in (None, ""):
@@ -32,6 +38,39 @@ class SelectedUpgradesField(serializers.Field):
         return [option_lookup[option_id] for option_id in option_ids]
 
 
+class SelectedUpgradeSelectionsField(serializers.Field):
+    def to_representation(self, value):
+        return [
+            {"option": selection.option_id, "quantity": max(1, selection.quantity)}
+            for selection in value.all()
+        ]
+
+    def to_internal_value(self, data):
+        if data in (None, ""):
+            return []
+        if not isinstance(data, list):
+            raise serializers.ValidationError("Selected upgrade selections must be a list.")
+        option_ids: list[int] = []
+        quantities_by_option: dict[int, int] = {}
+        for item in data:
+            if not isinstance(item, dict):
+                raise serializers.ValidationError("Selected upgrade selections must be objects.")
+            try:
+                option_id = int(item.get("option"))
+                quantity = int(item.get("quantity", 1))
+            except (TypeError, ValueError):
+                raise serializers.ValidationError("Selected upgrade selections require option and quantity.")
+            if quantity < 1:
+                raise serializers.ValidationError("Selected upgrade quantity must be at least 1.")
+            option_ids.append(option_id)
+            quantities_by_option[option_id] = quantity
+        options = list(UnitUpgradeOption.objects.filter(id__in=option_ids).select_related("section"))
+        if len(options) != len(set(option_ids)):
+            raise serializers.ValidationError("Selected upgrade option was not found.")
+        option_lookup = {option.id: option for option in options}
+        return [(option_lookup[option_id], quantities_by_option[option_id]) for option_id in option_ids]
+
+
 class ListUnitSerializer(serializers.ModelSerializer):
     unit_name = serializers.CharField(source="unit.name", read_only=True)
     unit_points = serializers.IntegerField(source="unit.points", read_only=True)
@@ -42,6 +81,10 @@ class ListUnitSerializer(serializers.ModelSerializer):
     )
     total_points = serializers.SerializerMethodField()
     selected_upgrades = SelectedUpgradesField(required=False)
+    selected_upgrade_selections = SelectedUpgradeSelectionsField(
+        source="selected_upgrades",
+        required=False,
+    )
     loadout_weapon_names = serializers.SerializerMethodField()
     loadout_summary = serializers.SerializerMethodField()
 
@@ -56,6 +99,7 @@ class ListUnitSerializer(serializers.ModelSerializer):
             "selected_weapon_slot",
             "selected_weapon_name",
             "selected_upgrades",
+            "selected_upgrade_selections",
             "loadout_weapon_names",
             "loadout_summary",
             "parent_entry",
@@ -98,7 +142,7 @@ class ListUnitSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({"parent_entry": parent_error})
         selected_upgrades = attrs.get("selected_upgrades")
         if selected_upgrades is not None and unit is not None:
-            _validate_upgrade_options(unit, selected_upgrades)
+            attrs["selected_upgrades"] = _validate_upgrade_options(unit, selected_upgrades)
         return attrs
 
     def update(self, instance, validated_data):
@@ -142,6 +186,10 @@ class ArmyListSerializer(serializers.ModelSerializer):
 
 class AddListUnitSerializer(serializers.ModelSerializer):
     selected_upgrades = SelectedUpgradesField(required=False)
+    selected_upgrade_selections = SelectedUpgradeSelectionsField(
+        source="selected_upgrades",
+        required=False,
+    )
 
     class Meta:
         model = ListUnit
@@ -150,6 +198,7 @@ class AddListUnitSerializer(serializers.ModelSerializer):
             "model_count",
             "selected_weapon_slot",
             "selected_upgrades",
+            "selected_upgrade_selections",
             "parent_entry",
             "combined_from_count",
             "notes",
@@ -177,7 +226,7 @@ class AddListUnitSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"combined_from_count": "Combined count must be at least 1."})
         selected_upgrades = attrs.get("selected_upgrades")
         if selected_upgrades is not None and unit is not None:
-            _validate_upgrade_options(unit, selected_upgrades)
+            attrs["selected_upgrades"] = _validate_upgrade_options(unit, selected_upgrades)
         return attrs
 
     def create(self, validated_data):
@@ -187,22 +236,79 @@ class AddListUnitSerializer(serializers.ModelSerializer):
         return instance
 
 
-def _validate_upgrade_options(unit, options: list[UnitUpgradeOption]) -> None:
+def _validate_upgrade_options(unit, options) -> list[tuple[UnitUpgradeOption, int]]:
+    selections = _normalize_upgrade_selections(options)
     seen_sections: set[int] = set()
-    for option in options:
+    for option, quantity in selections:
         if option.section.unit_id != unit.id:
             raise serializers.ValidationError(
                 {"selected_upgrades": "Selected upgrade must belong to the unit."}
             )
-        if option.section_id in seen_sections:
+        if option.section_id in seen_sections and not _is_replace_any_section(option.section):
             raise serializers.ValidationError(
                 {"selected_upgrades": "Only one upgrade can be selected per section."}
             )
         seen_sections.add(option.section_id)
+    replace_any_error = _replace_any_quantity_error(unit, selections)
+    if replace_any_error:
+        raise serializers.ValidationError({"selected_upgrades": replace_any_error})
+    resolution = resolve_unit_upgrade_options(unit, [option for option, _quantity in selections])
+    if not resolution.is_valid:
+        raise serializers.ValidationError({"selected_upgrades": " ".join(resolution.errors)})
+    quantity_by_option = {option.id: quantity for option, quantity in selections}
+    return [(option, quantity_by_option.get(option.id, 1)) for option in resolution.options]
 
 
-def _replace_selected_upgrades(instance: ListUnit, options: list[UnitUpgradeOption]) -> None:
+def _replace_selected_upgrades(instance: ListUnit, options) -> None:
+    selections = _normalize_upgrade_selections(options)
     instance.selected_upgrades.all().delete()
     ListUnitUpgrade.objects.bulk_create(
-        [ListUnitUpgrade(list_unit=instance, option=option) for option in options]
+        [
+            ListUnitUpgrade(list_unit=instance, option=option, quantity=quantity)
+            for option, quantity in selections
+        ]
     )
+
+
+def _normalize_upgrade_selections(options) -> list[tuple[UnitUpgradeOption, int]]:
+    selections: list[tuple[UnitUpgradeOption, int]] = []
+    for item in options or []:
+        if isinstance(item, tuple):
+            option, quantity = item
+        else:
+            option, quantity = item, 1
+        selections.append((option, max(1, int(quantity))))
+    return selections
+
+
+def _replace_any_quantity_error(
+    unit,
+    selections: list[tuple[UnitUpgradeOption, int]],
+) -> str | None:
+    by_section: dict[int, list[tuple[UnitUpgradeOption, int]]] = {}
+    for option, quantity in selections:
+        by_section.setdefault(option.section_id, []).append((option, quantity))
+    for section_options in by_section.values():
+        section = section_options[0][0].section
+        if not _is_replace_any_section(section):
+            continue
+        selected_quantity = sum(quantity for _option, quantity in section_options)
+        available = _target_weapon_count(unit, section.targets)
+        if selected_quantity > available:
+            return f"{section.label} can replace at most {available} matching weapons."
+    return None
+
+
+def _target_weapon_count(unit, targets: list[str]) -> int:
+    from army_books.upgrade_matching import weapon_matches_upgrade_target
+
+    count = 0
+    for slot in unit.weapon_slots.all():
+        if slot.is_default and weapon_matches_upgrade_target(slot.weapon.name, targets):
+            count += slot.count or unit.default_models or 1
+    return count
+
+
+def _is_replace_any_section(section) -> bool:
+    affects = getattr(section, "affects", None) or {}
+    return section.variant.lower() == "replace" and str(affects.get("type") or "").lower() == "any"

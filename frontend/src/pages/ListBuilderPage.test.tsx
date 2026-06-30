@@ -544,12 +544,14 @@ describe('ListBuilderPage', () => {
           effective_wounds_per_100_points: 10,
           weapon_id: 30,
           weapon_name: 'Great Weapon',
+          limited_weapon_names: ['Fire Bomb'],
           target_results: [
             {
               target_id: 'infantry',
               ev: 1.25,
               ranged_ev: 0,
               melee_ev: 1.25,
+              burst_ev: 3.5,
               wounds_per_100_points: 0.69,
               ranged_wounds_per_100_points: 0,
               melee_wounds_per_100_points: 0.69,
@@ -676,6 +678,8 @@ describe('ListBuilderPage', () => {
     expect(screen.getAllByText('Ranged 0.00 / Melee 1.25').length).toBeGreaterThan(0)
     expect(screen.getAllByText('18.00 toughness').length).toBeGreaterThan(0)
     expect(screen.getAllByText('0.69 wounds / 100 pts').length).toBeGreaterThan(0)
+    expect(screen.getByText('Limited: Fire Bomb')).toBeInTheDocument()
+    expect(screen.getByText('Burst 3.50 once per game')).toBeInTheDocument()
     const graph = screen.getByRole('img', { name: /balanced list web graph/i })
     expect(graph).toBeInTheDocument()
     expect(within(graph).getByText('Activation')).toBeInTheDocument()
@@ -689,7 +693,9 @@ describe('ListBuilderPage', () => {
     expect(screen.getByText('Activation Health')).toBeInTheDocument()
     expect(screen.getByText('Objective Reach')).toBeInTheDocument()
     expect(screen.getByText('Casting Support')).toBeInTheDocument()
-    expect(screen.getByText('Damage Pressure')).toBeInTheDocument()
+    expect(screen.getByText('Damage Output')).toBeInTheDocument()
+    expect(screen.queryByText('Damage Pressure')).not.toBeInTheDocument()
+    expect(screen.getByText('1.25 Infantry / 0.75 Elite / 0.50 Monster total EV')).toBeInTheDocument()
     expect(screen.getAllByText('Durability').length).toBeGreaterThan(0)
     expect(screen.getByText('Threat Coverage')).toBeInTheDocument()
     expect(screen.getByText('Battleline Balance')).toBeInTheDocument()

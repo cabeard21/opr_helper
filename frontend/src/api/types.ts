@@ -27,6 +27,7 @@ export type UnitWeaponSlot = {
   id: number
   weapon: Weapon
   is_default: boolean
+  count?: number | null
   upgrade_cost: number
   option_id: string | null
   upgrade_id: string | null
@@ -48,6 +49,7 @@ export type UnitUpgradeSection = {
   label: string
   variant: string
   targets: string[]
+  affects?: Record<string, unknown>
   options: UnitUpgradeOption[]
 }
 
@@ -88,6 +90,7 @@ export type ListUnit = {
   selected_weapon_slot: number | null
   selected_weapon_name: string | null
   selected_upgrades: number[]
+  selected_upgrade_selections?: Array<{ option: number; quantity: number }>
   loadout_weapon_names: string[]
   loadout_summary: string
   parent_entry: number | null
@@ -124,6 +127,7 @@ export type AddListUnitInput = {
   model_count: number
   selected_weapon_slot?: number | null
   selected_upgrades?: number[]
+  selected_upgrade_selections?: Array<{ option: number; quantity: number }>
   notes?: string
 }
 
@@ -131,6 +135,7 @@ export type UpdateListUnitInput = Partial<{
   model_count: number
   selected_weapon_slot: number | null
   selected_upgrades: number[]
+  selected_upgrade_selections: Array<{ option: number; quantity: number }>
   parent_entry: number | null
   combined_from_count: number
   notes: string
@@ -196,6 +201,7 @@ export type SuggestedUnit = {
   model_count: number
   combined_from_count: number
   selected_upgrade_ids: number[]
+  selected_upgrade_selections?: Array<{ option: number; quantity: number }>
   parent_unit_index?: number | null
   justification: string
 }
@@ -264,6 +270,10 @@ export type UnitTargetResult = {
   ranged_ev: number
   melee_ev: number
   activation_ev?: number
+  burst_ev?: number
+  burst_ranged_ev?: number
+  burst_melee_ev?: number
+  burst_activation_ev?: number
   wounds_per_100_points: number
   ranged_wounds_per_100_points: number
   melee_wounds_per_100_points: number
@@ -282,6 +292,7 @@ export type ListAnalysisUnit = {
   weapon_id: number
   weapon_name: string
   weapon_names?: string[]
+  limited_weapon_names?: string[]
   target_results: UnitTargetResult[]
 }
 
@@ -291,6 +302,10 @@ export type ListAnalysisTotal = {
   ranged_ev: number
   melee_ev: number
   activation_ev?: number
+  burst_ev?: number
+  burst_ranged_ev?: number
+  burst_melee_ev?: number
+  burst_activation_ev?: number
   wounds_per_100_points: number
   ranged_wounds_per_100_points: number
   melee_wounds_per_100_points: number

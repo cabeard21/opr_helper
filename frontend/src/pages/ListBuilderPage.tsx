@@ -183,6 +183,28 @@ export function ListBuilderPage() {
     }
   }
 
+  async function updateSelectedUpgradeSelections(
+    entry: ListUnit,
+    nextSelections: Array<{ option: number; quantity: number }>,
+  ) {
+    if (!currentArmyList) {
+      return
+    }
+    setBusyUnitId(entry.unit)
+    setError(null)
+    try {
+      setArmyList(
+        await apiClient.updateListUnit(currentArmyList.id, entry.id, {
+          selected_upgrade_selections: nextSelections,
+        }),
+      )
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setBusyUnitId(null)
+    }
+  }
+
   async function updateCombinedCount(entry: ListUnit, nextCount: number) {
     if (!currentArmyList || nextCount < 1) {
       return
@@ -315,6 +337,7 @@ export function ListBuilderPage() {
                   onRemove={() => removeUnit(entry)}
                   onSelectWeapon={(slotId) => updateSelectedWeapon(entry, slotId)}
                   onSelectUpgrades={(optionIds) => updateSelectedUpgrades(entry, optionIds)}
+                  onSelectUpgradeSelections={(selections) => updateSelectedUpgradeSelections(entry, selections)}
                   unit={unitLookup.get(entry.unit)}
                   armyUnits={currentArmyList.units}
                   unitLookup={unitLookup}
@@ -345,6 +368,7 @@ type ListUnitRowProps = {
   onRemove: () => void
   onSelectWeapon: (slotId: number | null) => void
   onSelectUpgrades: (optionIds: number[]) => void
+  onSelectUpgradeSelections: (selections: Array<{ option: number; quantity: number }>) => void
 }
 
 function ListUnitRow({
@@ -360,6 +384,7 @@ function ListUnitRow({
   onRemove,
   onSelectWeapon,
   onSelectUpgrades,
+  onSelectUpgradeSelections,
   unit,
   unitLookup,
 }: ListUnitRowProps) {
@@ -416,30 +441,41 @@ function ListUnitRow({
               {unit.upgrade_sections.map((section) => {
                 const selectedOption =
                   section.options.find((option) => entry.selected_upgrades.includes(option.id)) ?? null
+                const replaceAny = isReplaceAnySection(section)
                 return (
-                  <label className="app-label grid gap-1" key={section.id}>
-                    {section.label}
-                    <select
-                      aria-label={`${section.label} for ${entry.unit_name}`}
-                      className="app-field min-w-0 w-full"
-                      disabled={busy}
-                      onChange={(event) => {
-                        const optionId = event.target.value ? Number(event.target.value) : null
-                        const sectionOptionIds = new Set(section.options.map((option) => option.id))
-                        const nextOptionIds = entry.selected_upgrades.filter((id) => !sectionOptionIds.has(id))
-                        onSelectUpgrades(optionId ? [...nextOptionIds, optionId] : nextOptionIds)
-                      }}
-                      value={selectedOption?.id ?? ''}
-                    >
-                      <option value="">No upgrade</option>
-                      {section.options.map((option) => (
-                        <option key={option.id} value={option.id}>
-                          {option.label}
-                          {option.cost > 0 ? ` (+${option.cost} pts)` : ''}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                  <div className="app-label grid gap-1" key={section.id}>
+                    <span>{section.label}</span>
+                    {replaceAny ? (
+                      <ReplaceAnyUpgradeControls
+                        busy={busy}
+                        entry={entry}
+                        onChange={onSelectUpgradeSelections}
+                        section={section}
+                        unit={unit}
+                      />
+                    ) : (
+                      <select
+                        aria-label={`${section.label} for ${entry.unit_name}`}
+                        className="app-field min-w-0 w-full"
+                        disabled={busy}
+                        onChange={(event) => {
+                          const optionId = event.target.value ? Number(event.target.value) : null
+                          const sectionOptionIds = new Set(section.options.map((option) => option.id))
+                          const nextOptionIds = entry.selected_upgrades.filter((id) => !sectionOptionIds.has(id))
+                          onSelectUpgrades(optionId ? [...nextOptionIds, optionId] : nextOptionIds)
+                        }}
+                        value={selectedOption?.id ?? ''}
+                      >
+                        <option value="">No upgrade</option>
+                        {section.options.map((option) => (
+                          <option key={option.id} value={option.id}>
+                            {option.label}
+                            {option.cost > 0 ? ` (+${option.cost} pts)` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
                 )
               })}
             </div>
@@ -568,6 +604,99 @@ function AdvisorListSummary({ armyList }: { armyList: ArmyList }) {
       ) : null}
     </section>
   )
+}
+
+type ReplaceAnyUpgradeControlsProps = {
+  busy: boolean
+  entry: ListUnit
+  onChange: (selections: Array<{ option: number; quantity: number }>) => void
+  section: Unit['upgrade_sections'][number]
+  unit: Unit
+}
+
+function ReplaceAnyUpgradeControls({
+  busy,
+  entry,
+  onChange,
+  section,
+  unit,
+}: ReplaceAnyUpgradeControlsProps) {
+  const sectionOptionIds = new Set(section.options.map((option) => option.id))
+  const existingSelections = entry.selected_upgrade_selections ?? []
+  const selectedInSection = existingSelections.filter((selection) => sectionOptionIds.has(selection.option))
+  const selectedCount = selectedInSection.reduce((sum, selection) => sum + selection.quantity, 0)
+  const maxCount = replaceTargetCount(unit, section)
+
+  function setOptionQuantity(optionId: number, quantity: number) {
+    const outsideSection = existingSelections.filter((selection) => !sectionOptionIds.has(selection.option))
+    const nextInSection = section.options
+      .map((option) => {
+        const current = selectedInSection.find((selection) => selection.option === option.id)
+        const nextQuantity = option.id === optionId ? quantity : current?.quantity ?? 0
+        return nextQuantity > 0 ? { option: option.id, quantity: nextQuantity } : null
+      })
+      .filter((selection): selection is { option: number; quantity: number } => selection !== null)
+    onChange([...outsideSection, ...nextInSection])
+  }
+
+  return (
+    <div className="grid gap-2 rounded border p-2" style={{ borderColor: 'var(--color-border)' }}>
+      {section.options.map((option) => {
+        const selected = selectedInSection.find((selection) => selection.option === option.id)
+        const quantity = selected?.quantity ?? 0
+        const canIncrease = selectedCount < maxCount
+        return (
+          <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2" key={option.id}>
+            <span className="min-w-0 text-sm" style={{ color: 'var(--color-text)' }}>
+              {option.label}
+              {option.cost > 0 ? ` (+${option.cost} pts)` : ''}
+            </span>
+            <div className="flex items-center gap-1">
+              <button
+                aria-label={`Decrease ${option.label}`}
+                className="h-7 w-7 rounded border text-sm font-semibold disabled:opacity-40"
+                disabled={busy || quantity <= 0}
+                onClick={() => setOptionQuantity(option.id, quantity - 1)}
+                style={{ borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                type="button"
+              >
+                -
+              </button>
+              <span className="w-6 text-center text-sm font-semibold">{quantity}</span>
+              <button
+                aria-label={`Increase ${option.label}`}
+                className="h-7 w-7 rounded border text-sm font-semibold disabled:opacity-40"
+                disabled={busy || !canIncrease}
+                onClick={() => setOptionQuantity(option.id, quantity + 1)}
+                style={{ borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                type="button"
+              >
+                +
+              </button>
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function isReplaceAnySection(section: Unit['upgrade_sections'][number]) {
+  return section.variant.toLowerCase() === 'replace' && String(section.affects?.type ?? '').toLowerCase() === 'any'
+}
+
+function replaceTargetCount(unit: Unit, section: Unit['upgrade_sections'][number]) {
+  const targets = new Set(section.targets.map((target) => normalizeWeaponName(target)))
+  return unit.weapon_slots.reduce((sum, slot) => {
+    if (!slot.is_default || !targets.has(normalizeWeaponName(slot.weapon.name))) {
+      return sum
+    }
+    return sum + (slot.count ?? unit.default_models ?? 1)
+  }, 0)
+}
+
+function normalizeWeaponName(value: string) {
+  return value.trim().toLowerCase().replace(/\s+/g, ' ').replace(/s$/, '')
 }
 
 function isHero(unit: Unit) {
@@ -764,7 +893,14 @@ function AnalysisPanel({ analysis, armyList, loading, units }: AnalysisPanelProp
           <tbody>
             {tableUnits.map((unit) => (
               <tr className="border-t" key={unit.list_unit_id} style={{ borderColor: 'var(--color-border)' }}>
-                <td className="px-4 py-3 font-semibold" style={{ color: 'var(--color-text)' }}>{unit.unit_name}</td>
+                <td className="px-4 py-3">
+                  <div className="font-semibold" style={{ color: 'var(--color-text)' }}>{unit.unit_name}</div>
+                  {unit.limited_weapon_names && unit.limited_weapon_names.length > 0 ? (
+                    <div className="app-subtle mt-1 text-xs">
+                      Limited: {unit.limited_weapon_names.join(', ')}
+                    </div>
+                  ) : null}
+                </td>
                 <td className="px-4 py-3" style={{ color: 'var(--color-text-muted)' }}>
                   {unit.effective_wounds.toFixed(2)}
                 </td>
@@ -781,6 +917,11 @@ function AnalysisPanel({ analysis, armyList, loading, units }: AnalysisPanelProp
                       <div className="app-muted mt-1 text-xs">
                         Ranged {result.ranged_ev.toFixed(2)} / Melee {result.melee_ev.toFixed(2)}
                       </div>
+                      {limitedBurstLabel(result) ? (
+                        <div className="app-subtle mt-1 text-xs">
+                          {limitedBurstLabel(result)}
+                        </div>
+                      ) : null}
                       <div className="app-muted mt-1 text-xs">
                         {result.wounds_per_100_points.toFixed(2)} wounds / 100 pts
                       </div>
@@ -1124,7 +1265,13 @@ function buildListHealthMetrics(
   const mobileEntries = effectiveEntries.filter((entry) => entryHasAnyRule(entry, unitLookup, MOBILITY_RULES))
   const castingTarget = armyList.point_limit >= 1500 ? 3 : 1
   const castingPower = totalCastingPower(armyList, unitLookup)
-  const averageWoundsPer100 = average(analysis.totals.map(activationWoundsPer100))
+  const damageOutputScore = average(analysis.totals.map((total) => totalDamageOutputScore(total, armyList.point_limit)))
+  const damageOutputSummary = analysis.targets
+    .map((target) => {
+      const total = analysis.totals.find((candidate) => candidate.target_id === target.id)
+      return `${(total?.ev ?? 0).toFixed(2)} ${target.name}`
+    })
+    .join(' / ')
   const averageDurability = average(analysis.units.map((unit) => unit.effective_wounds_per_100_points))
   const weakestTarget = [...analysis.totals].sort(
     (left, right) => activationWoundsPer100(left) - activationWoundsPer100(right),
@@ -1157,10 +1304,10 @@ function buildListHealthMetrics(
       `${castingPower} casting power / target ${castingTarget}`,
     ),
     metric(
-      'damage-pressure',
-      'Damage Pressure',
-      clampScore((averageWoundsPer100 / 0.75) * 100),
-      `${averageWoundsPer100.toFixed(2)} avg activation wounds / 100 pts`,
+      'damage-output',
+      'Damage Output',
+      damageOutputScore,
+      `${damageOutputSummary} total EV`,
     ),
     metric(
       'durability',
@@ -1185,6 +1332,12 @@ function buildListHealthMetrics(
 
 const MOBILITY_RULES = new Set(['aircraft', 'ambush', 'fast', 'flying', 'scout', 'strider', 'transport'])
 
+const DAMAGE_OUTPUT_BENCHMARKS_750: Record<string, number> = {
+  infantry: 25,
+  elite: 12,
+  monster: 8,
+}
+
 function metric(id: string, label: string, score: number, summary: string): ListHealthMetric {
   return {
     id,
@@ -1199,12 +1352,21 @@ function activationWoundsPer100(result?: { activation_wounds_per_100_points?: nu
   return result?.activation_wounds_per_100_points ?? result?.wounds_per_100_points ?? 0
 }
 
+function totalDamageOutputScore(result: ListAnalysisResult['totals'][number], pointLimit: number) {
+  const benchmark = DAMAGE_OUTPUT_BENCHMARKS_750[result.target_id]
+  if (!benchmark) {
+    return 0
+  }
+  const scaledBenchmark = benchmark * (Math.max(1, pointLimit) / 750)
+  return clampScore((result.ev / scaledBenchmark) * 100)
+}
+
 function graphAxisLabel(metric: ListHealthMetric) {
   const labels: Record<string, string> = {
     'activation-health': 'Activation',
     'objective-reach': 'Reach',
     'casting-support': 'Casting',
-    'damage-pressure': 'Damage',
+    'damage-output': 'Damage',
     durability: 'Durability',
     'threat-coverage': 'Coverage',
     'battleline-balance': 'Balance',
@@ -1388,6 +1550,10 @@ function resultFor(unit: ListAnalysisUnit, targetId: string) {
       ranged_ev: 0,
       melee_ev: 0,
       activation_ev: 0,
+      burst_ev: 0,
+      burst_ranged_ev: 0,
+      burst_melee_ev: 0,
+      burst_activation_ev: 0,
       wounds_per_100_points: 0,
       ranged_wounds_per_100_points: 0,
       melee_wounds_per_100_points: 0,
@@ -1395,4 +1561,11 @@ function resultFor(unit: ListAnalysisUnit, targetId: string) {
       p_kill_model: 0,
     }
   )
+}
+
+function limitedBurstLabel(result: { ev: number; burst_ev?: number }) {
+  if (result.burst_ev === undefined || result.burst_ev <= result.ev) {
+    return ''
+  }
+  return `Burst ${result.burst_ev.toFixed(2)} once per game`
 }

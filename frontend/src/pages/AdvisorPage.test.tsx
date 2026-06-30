@@ -154,4 +154,29 @@ describe('AdvisorPage', () => {
     expect(await screen.findByText('Describe what you want the list to do.')).toBeInTheDocument()
     expect(apiClient.suggestArmyList).not.toHaveBeenCalled()
   })
+
+  it('uses a list style prompt as the goal', async () => {
+    const user = userEvent.setup()
+    vi.mocked(apiClient.getFactions).mockResolvedValue(factions)
+    vi.mocked(apiClient.suggestArmyList).mockResolvedValue(previewResponse)
+
+    render(
+      <MemoryRouter initialEntries={['/advisor']}>
+        <Routes>
+          <Route path="/advisor" element={<AdvisorPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByRole('heading', { name: 'Army advisor' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /use mobile objective pressure prompt/i }))
+    await user.click(screen.getByRole('button', { name: /preview suggestion/i }))
+
+    expect(apiClient.suggestArmyList).toHaveBeenCalledWith({
+      faction: 1,
+      point_limit: 2000,
+      prompt: 'Build a mobile objective pressure list with enough activations to trade onto objectives, fast scoring pieces, and just enough damage to remove common contesting units.',
+      dry_run: true,
+    })
+  })
 })

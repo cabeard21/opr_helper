@@ -16,7 +16,7 @@ from advisor.llm_service import (
 )
 from advisor.rate_limit import advisor_rate_limit_exceeded
 from advisor.reconciliation import ReconciledSuggestion, reconcile_suggestion
-from advisor.suggestion_analysis import analyze_reconciled_suggestion, build_metrics_correction_feedback
+from advisor.suggestion_analysis import SuggestionAnalysis, analyze_reconciled_suggestion, build_metrics_correction_feedback
 from army_books.models import Faction, Unit
 from lists.models import ArmyList, ListUnit, ListUnitUpgrade
 from lists.serializers import ArmyListSerializer
@@ -72,10 +72,14 @@ def suggest_army_list(request):
         suggestion=suggestion,
     )
     if payload["suggestion"] is None:
-        correction_feedback = _advisor_correction_feedback(
+        original_analysis = analyze_reconciled_suggestion(
             faction=faction,
             reconciled=reconciled,
             point_limit=payload["point_limit"],
+        )
+        correction_feedback = _advisor_correction_feedback(
+            reconciled=reconciled,
+            analysis=original_analysis,
         )
         if correction_feedback:
             try:
@@ -94,7 +98,17 @@ def suggest_army_list(request):
                     point_limit=payload["point_limit"],
                     suggestion=retry_suggestion,
                 )
-                if _prefer_retry_reconciliation(reconciled, retry_reconciled):
+                retry_analysis = analyze_reconciled_suggestion(
+                    faction=faction,
+                    point_limit=payload["point_limit"],
+                    reconciled=retry_reconciled,
+                )
+                if _prefer_retry_reconciliation(
+                    reconciled,
+                    retry_reconciled,
+                    original_analysis=original_analysis,
+                    retry_analysis=retry_analysis,
+                ):
                     reconciled = retry_reconciled
 
     if not payload["dry_run"] and not reconciled.suggestion.units:
@@ -198,9 +212,8 @@ def _response_data(
 
 def _advisor_correction_feedback(
     *,
-    faction: Faction,
     reconciled: ReconciledSuggestion,
-    point_limit: int,
+    analysis: SuggestionAnalysis,
 ) -> str:
     avoidable_warnings = [
         warning
@@ -217,7 +230,7 @@ def _advisor_correction_feedback(
             )
         )
     ]
-    underfilled = point_limit > 0 and 0 < reconciled.computed_total_points < point_limit * 0.9
+    underfilled = analysis.point_limit > 0 and 0 < analysis.total_points < analysis.point_limit * 0.9
 
     feedback: list[str] = []
     if avoidable_warnings:
@@ -225,16 +238,10 @@ def _advisor_correction_feedback(
         feedback.extend(f"- {warning}" for warning in avoidable_warnings[:8])
     if underfilled:
         feedback.append(
-            f"Spend closer to {point_limit} points; the prior legal total was "
-            f"{reconciled.computed_total_points}."
+            f"Spend closer to {analysis.point_limit} points; the prior legal total was "
+            f"{analysis.total_points}."
         )
-    metrics_feedback = build_metrics_correction_feedback(
-        analyze_reconciled_suggestion(
-            faction=faction,
-            point_limit=point_limit,
-            reconciled=reconciled,
-        )
-    )
+    metrics_feedback = build_metrics_correction_feedback(analysis)
     if metrics_feedback:
         feedback.append(metrics_feedback)
     return "\n".join(feedback)
@@ -243,6 +250,9 @@ def _advisor_correction_feedback(
 def _prefer_retry_reconciliation(
     original: ReconciledSuggestion,
     retry: ReconciledSuggestion,
+    *,
+    original_analysis: SuggestionAnalysis | None = None,
+    retry_analysis: SuggestionAnalysis | None = None,
 ) -> bool:
     if retry.suggestion.units and not original.suggestion.units:
         return True
@@ -253,8 +263,21 @@ def _prefer_retry_reconciliation(
     retry_warnings = len(retry.warnings)
     original_warnings = len(original.warnings)
     if retry_delta <= original_delta and retry_warnings <= original_warnings:
-        return retry_delta < original_delta or retry_warnings < original_warnings
+        return (
+            retry_delta < original_delta
+            or retry_warnings < original_warnings
+            or _damage_output_improved(original_analysis, retry_analysis)
+        )
     return False
+
+
+def _damage_output_improved(
+    original_analysis: SuggestionAnalysis | None,
+    retry_analysis: SuggestionAnalysis | None,
+) -> bool:
+    if original_analysis is None or retry_analysis is None:
+        return False
+    return retry_analysis.damage_output_score >= original_analysis.damage_output_score + 5
 
 
 def _create_army_list(
@@ -299,8 +322,12 @@ def _create_army_list(
         entry.save(update_fields=["selected_weapon_slot"])
         ListUnitUpgrade.objects.bulk_create(
             [
-                ListUnitUpgrade(list_unit=entry, option_id=option_id)
-                for option_id in suggested_unit.selected_upgrade_ids
+                ListUnitUpgrade(
+                    list_unit=entry,
+                    option_id=selection["option"],
+                    quantity=selection["quantity"],
+                )
+                for selection in _selected_upgrade_selections(suggested_unit)
             ]
         )
         entries.append(entry)
@@ -315,6 +342,26 @@ def _create_army_list(
         entry.parent_entry = parent_entry
         entry.save(update_fields=["parent_entry"])
     return army_list
+
+
+def _selected_upgrade_selections(suggested_unit) -> list[dict[str, int]]:
+    raw_selections = getattr(suggested_unit, "selected_upgrade_selections", None) or []
+    if raw_selections:
+        selections: list[dict[str, int]] = []
+        for selection in raw_selections:
+            if hasattr(selection, "option"):
+                option_id = getattr(selection, "option")
+                quantity = getattr(selection, "quantity", 1)
+            else:
+                option_id = selection.get("option") if isinstance(selection, dict) else None
+                quantity = selection.get("quantity", 1) if isinstance(selection, dict) else 1
+            if option_id is not None:
+                selections.append({"option": int(option_id), "quantity": max(1, int(quantity))})
+        return selections
+    return [
+        {"option": int(option_id), "quantity": 1}
+        for option_id in suggested_unit.selected_upgrade_ids
+    ]
 
 
 def _advisor_list_name(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Protocol, TypeVar
 
 from django.conf import settings
@@ -17,11 +18,23 @@ from advisor.packages import (
 )
 from army_books.models import Faction, FactionSpell
 
-ADVISOR_MAX_OUTPUT_TOKENS = 4096
+ADVISOR_MAX_OUTPUT_TOKENS = 8192
+ADVISOR_RETRY_MAX_OUTPUT_TOKENS = 8192
+ADVISOR_PARSE_RETRY_INSTRUCTION = (
+    "Return complete valid JSON that exactly matches the requested schema. "
+    "Keep justifications concise so the response is not truncated."
+)
+
+logger = logging.getLogger(__name__)
 
 
 class AdvisorLLMError(Exception):
     """Raised when the advisor LLM provider cannot satisfy a request."""
+
+
+class SelectedUpgradeSelection(BaseModel):
+    option: int = Field(gt=0, description="Local database id of the selected native upgrade option.")
+    quantity: int = Field(default=1, ge=1, description="Number of times this option is selected.")
 
 
 class SuggestedUnit(BaseModel):
@@ -36,6 +49,10 @@ class SuggestedUnit(BaseModel):
     selected_upgrade_ids: list[int] = Field(
         default_factory=list,
         description="Local database ids of selected native upgrade options.",
+    )
+    selected_upgrade_selections: list[SelectedUpgradeSelection] = Field(
+        default_factory=list,
+        description="Selected native upgrade options with quantities for variable replacement upgrades.",
     )
     parent_unit_index: int | None = Field(
         default=None,
@@ -100,28 +117,92 @@ class OpenAIAdvisorProvider:
         user_context: str,
         text_format: type[SuggestionModel] = ListSuggestion,
     ) -> SuggestionModel:
-        try:
-            response = self.client.responses.parse(
-                model=settings.OPENAI_MODEL,
-                instructions=system_prompt,
-                input=user_context,
-                text_format=text_format,
-                max_output_tokens=ADVISOR_MAX_OUTPUT_TOKENS,
-            )
-        except OpenAIError as exc:
-            raise AdvisorLLMError("OpenAI provider request failed.") from exc
-        except ValidationError as exc:
-            raise AdvisorLLMError("LLM response did not match the structured suggestion schema.") from exc
+        response = self._parse_response(
+            system_prompt=system_prompt,
+            user_context=user_context,
+            text_format=text_format,
+            max_output_tokens=ADVISOR_MAX_OUTPUT_TOKENS,
+        )
+        parsed = self._parsed_output(response, text_format)
+        if parsed is not None:
+            return parsed
 
+        logger.warning(
+            "Advisor provider returned no parsed output; retrying with stricter structured-output instructions. %s",
+            _response_debug_summary(response),
+        )
+        retry_response = self._parse_response(
+            system_prompt=f"{system_prompt}\n\n{ADVISOR_PARSE_RETRY_INSTRUCTION}",
+            user_context=user_context,
+            text_format=text_format,
+            max_output_tokens=ADVISOR_RETRY_MAX_OUTPUT_TOKENS,
+        )
+        parsed = self._parsed_output(retry_response, text_format)
+        if parsed is not None:
+            return parsed
+        raise AdvisorLLMError("LLM response did not include a structured suggestion.")
+
+    def _parsed_output(
+        self,
+        response,
+        text_format: type[SuggestionModel],
+    ) -> SuggestionModel | None:
         parsed = getattr(response, "output_parsed", None)
         if parsed is None:
-            raise AdvisorLLMError("LLM response did not include a structured suggestion.")
+            return None
         if isinstance(parsed, text_format):
             return parsed
         try:
             return text_format.model_validate(parsed)
         except ValidationError as exc:
             raise AdvisorLLMError("LLM response did not match the suggestion schema.") from exc
+
+    def _parse_response(
+        self,
+        *,
+        system_prompt: str,
+        user_context: str,
+        text_format: type[SuggestionModel],
+        max_output_tokens: int,
+    ):
+        try:
+            return self.client.responses.parse(
+                model=settings.OPENAI_MODEL,
+                instructions=system_prompt,
+                input=user_context,
+                text_format=text_format,
+                max_output_tokens=max_output_tokens,
+            )
+        except OpenAIError as exc:
+            raise AdvisorLLMError("OpenAI provider request failed.") from exc
+        except ValidationError as exc:
+            try:
+                return self.client.responses.parse(
+                    model=settings.OPENAI_MODEL,
+                    instructions=f"{system_prompt}\n\n{ADVISOR_PARSE_RETRY_INSTRUCTION}",
+                    input=user_context,
+                    text_format=text_format,
+                    max_output_tokens=ADVISOR_RETRY_MAX_OUTPUT_TOKENS,
+                )
+            except OpenAIError as retry_exc:
+                raise AdvisorLLMError("OpenAI provider request failed.") from retry_exc
+            except ValidationError as retry_exc:
+                raise AdvisorLLMError("LLM response did not match the structured suggestion schema.") from retry_exc
+
+
+def _response_debug_summary(response) -> str:
+    parts: list[str] = []
+    for name in ("id", "status", "finish_reason"):
+        value = getattr(response, name, None)
+        if value:
+            parts.append(f"{name}={value}")
+    incomplete_details = getattr(response, "incomplete_details", None)
+    if incomplete_details:
+        parts.append(f"incomplete_details={incomplete_details}")
+    refusal = getattr(response, "refusal", None)
+    if refusal:
+        parts.append("refusal=true")
+    return " ".join(parts) if parts else "response had no diagnostic fields"
 
 
 def get_default_provider() -> str:
@@ -218,6 +299,7 @@ def package_suggestion_to_list_suggestion(
                 model_count=int(package["model_count"]),
                 combined_from_count=int(package.get("combined_from_count", 1)),
                 selected_upgrade_ids=list(package["selected_upgrade_ids"]),
+                selected_upgrade_selections=list(package.get("selected_upgrade_selections", [])),
                 parent_unit_index=parent_unit_index,
                 justification=selected.justification,
             )

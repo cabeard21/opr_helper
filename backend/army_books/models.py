@@ -94,6 +94,7 @@ class UnitWeaponSlot(models.Model):
         related_name="unit_slots",
     )
     is_default = models.BooleanField(default=True)
+    count = models.PositiveIntegerField(null=True, blank=True)
     upgrade_cost = models.IntegerField(default=0)
     option_id = models.CharField(max_length=120, null=True, blank=True, db_index=True)
     upgrade_id = models.CharField(max_length=120, null=True, blank=True, db_index=True)
@@ -116,6 +117,7 @@ class UnitUpgradeSection(models.Model):
     label = models.CharField(max_length=240)
     variant = models.CharField(max_length=40, blank=True)
     targets = models.JSONField(default=list, blank=True)
+    affects = models.JSONField(default=dict, blank=True)
 
     class Meta:
         ordering = ("unit__name", "label", "id")
@@ -171,6 +173,7 @@ class UnitUpgradeOptionWeapon(models.Model):
         on_delete=models.CASCADE,
         related_name="option_weapon_links",
     )
+    count = models.PositiveIntegerField(null=True, blank=True)
 
     class Meta:
         ordering = ("option__label", "weapon__name", "id")

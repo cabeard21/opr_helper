@@ -45,7 +45,7 @@ class OpenAIAdvisorProviderTests(SimpleTestCase):
         self.assertEqual(call_kwargs["text_format"], ListSuggestion)
         self.assertEqual(call_kwargs["instructions"], "Use doctrine.")
         self.assertEqual(call_kwargs["input"], "Faction context.")
-        self.assertEqual(call_kwargs["max_output_tokens"], 4096)
+        self.assertEqual(call_kwargs["max_output_tokens"], 8192)
 
     @override_settings(OPENAI_MODEL="gpt-5.5")
     def test_can_request_package_selection_schema(self):
@@ -99,6 +99,7 @@ class OpenAIAdvisorProviderTests(SimpleTestCase):
                     "model_count": 1,
                     "combined_from_count": 1,
                     "selected_upgrade_ids": [10],
+                    "selected_upgrade_selections": [{"option": 10, "quantity": 3}],
                 },
                 "u2-base": {
                     "unit_id": 2,
@@ -106,12 +107,17 @@ class OpenAIAdvisorProviderTests(SimpleTestCase):
                     "model_count": 1,
                     "combined_from_count": 1,
                     "selected_upgrade_ids": [],
+                    "selected_upgrade_selections": [],
                 },
             },
         )
 
         self.assertEqual(result.units[0].unit_id, 1)
         self.assertEqual(result.units[0].selected_upgrade_ids, [10])
+        self.assertEqual(
+            [selection.model_dump() for selection in result.units[0].selected_upgrade_selections],
+            [{"option": 10, "quantity": 3}],
+        )
         self.assertEqual(result.units[0].combined_from_count, 1)
         self.assertIsNone(result.units[0].parent_unit_index)
         self.assertEqual(result.units[1].unit_id, 2)
@@ -144,9 +150,41 @@ class OpenAIAdvisorProviderTests(SimpleTestCase):
 
         self.assertEqual(result.units[0].combined_from_count, 2)
 
-    def test_raises_advisor_error_when_response_has_no_parsed_output(self):
+    def test_retries_once_when_response_has_no_parsed_output(self):
+        suggestion = PackageListSuggestion(
+            units=[PackageSuggestedUnit(package_id="u1-base", justification="Durable scorer.")],
+            total_points=180,
+            archetype="Offensive Elite",
+            playstyle="Shove It In",
+            activation_count=1,
+            strategy_summary="Advance quickly and force favorable fights.",
+            warnings=[],
+        )
         client = Mock()
-        client.responses.parse.return_value = SimpleNamespace(output_parsed=None)
+        client.responses.parse.side_effect = [
+            SimpleNamespace(output_parsed=None),
+            SimpleNamespace(output_parsed=suggestion),
+        ]
+        provider = OpenAIAdvisorProvider(client=client)
+
+        result = provider.suggest(
+            system_prompt="Use package ids.",
+            user_context="Faction context.",
+            text_format=PackageListSuggestion,
+        )
+
+        self.assertEqual(result, suggestion)
+        self.assertEqual(client.responses.parse.call_count, 2)
+        retry_kwargs = client.responses.parse.call_args_list[1].kwargs
+        self.assertEqual(retry_kwargs["max_output_tokens"], 8192)
+        self.assertIn("Return complete valid JSON", retry_kwargs["instructions"])
+
+    def test_raises_advisor_error_when_retry_response_has_no_parsed_output(self):
+        client = Mock()
+        client.responses.parse.side_effect = [
+            SimpleNamespace(output_parsed=None),
+            SimpleNamespace(output_parsed=None),
+        ]
         provider = OpenAIAdvisorProvider(client=client)
 
         with self.assertRaisesMessage(AdvisorLLMError, "structured suggestion"):
@@ -165,6 +203,40 @@ class OpenAIAdvisorProviderTests(SimpleTestCase):
                 user_context="Faction context.",
                 text_format=PackageListSuggestion,
             )
+
+    @override_settings(OPENAI_MODEL="gpt-5.5")
+    def test_retries_once_when_structured_json_parse_fails(self):
+        suggestion = PackageListSuggestion(
+            units=[PackageSuggestedUnit(package_id="u1-base", justification="Durable scorer.")],
+            total_points=180,
+            archetype="Offensive Elite",
+            playstyle="Shove It In",
+            activation_count=1,
+            strategy_summary="Advance quickly and force favorable fights.",
+            warnings=[],
+        )
+        client = Mock()
+        try:
+            PackageListSuggestion.model_validate_json('{"units":[{"package_id":"u1-base","justification":"truncated')
+        except Exception as exc:
+            parse_error = exc
+        client.responses.parse.side_effect = [
+            parse_error,
+            SimpleNamespace(output_parsed=suggestion),
+        ]
+        provider = OpenAIAdvisorProvider(client=client)
+
+        result = provider.suggest(
+            system_prompt="Use package ids.",
+            user_context="Faction context.",
+            text_format=PackageListSuggestion,
+        )
+
+        self.assertEqual(result, suggestion)
+        self.assertEqual(client.responses.parse.call_count, 2)
+        retry_kwargs = client.responses.parse.call_args_list[1].kwargs
+        self.assertEqual(retry_kwargs["max_output_tokens"], 8192)
+        self.assertIn("Return complete valid JSON", retry_kwargs["instructions"])
 
     @override_settings(LLM_PROVIDER="openai")
     @patch("advisor.llm_service.OpenAIAdvisorProvider")

@@ -4,6 +4,8 @@ from math import ceil
 from typing import Any
 from collections import Counter, defaultdict
 
+from army_books.upgrade_matching import weapon_matches_upgrade_target
+from army_books.upgrade_resolution import resolve_unit_upgrade_options
 from lists.loadouts import selected_or_default_slot, selected_upgrade_cost
 from lists.models import ArmyList, ListUnit
 
@@ -155,6 +157,16 @@ def army_list_validation(army_list: ArmyList) -> dict[str, list[dict[str, Any]]]
                 }
             )
 
+        upgrade_error = validate_selected_upgrades(entry)
+        if upgrade_error:
+            errors.append(
+                {
+                    "code": "invalid_selected_upgrades",
+                    "list_unit_id": entry.id,
+                    "message": f"{entry.unit.name}: {upgrade_error}",
+                }
+            )
+
         if entry.combined_from_count < 1:
             errors.append(
                 {
@@ -245,6 +257,58 @@ def _force_org_errors(army_list: ArmyList, entries: list[ListUnit]) -> list[dict
             )
 
     return errors
+
+
+def validate_selected_upgrades(entry: ListUnit) -> str | None:
+    selections = getattr(entry, "selected_upgrades", None)
+    if selections is None:
+        return None
+    options = []
+    for selection in selections.all():
+        if selection.option.section.unit_id != entry.unit_id:
+            return "Selected upgrade must belong to the unit."
+        if selection.quantity > 1 and not _is_replace_any_section(selection.option.section):
+            return f"{selection.option.label} can only be selected once."
+        options.append(selection.option)
+    if not options:
+        return None
+    quantity_error = _replace_any_quantity_error(entry)
+    if quantity_error:
+        return quantity_error
+    resolution = resolve_unit_upgrade_options(entry.unit, options)
+    if resolution.is_valid:
+        return None
+    return " ".join(resolution.errors)
+
+
+def _replace_any_quantity_error(entry: ListUnit) -> str | None:
+    by_section: dict[int, int] = defaultdict(int)
+    section_by_id = {}
+    for selection in entry.selected_upgrades.all():
+        section = selection.option.section
+        if not _is_replace_any_section(section):
+            continue
+        by_section[section.id] += max(1, selection.quantity)
+        section_by_id[section.id] = section
+    for section_id, quantity in by_section.items():
+        section = section_by_id[section_id]
+        available = _target_weapon_count(entry, section.targets)
+        if quantity > available:
+            return f"{section.label} can replace at most {available} matching weapons."
+    return None
+
+
+def _target_weapon_count(entry: ListUnit, targets: list[str]) -> int:
+    count = 0
+    for slot in entry.unit.weapon_slots.all():
+        if slot.is_default and weapon_matches_upgrade_target(slot.weapon.name, targets):
+            count += slot.count or entry.unit.default_models or 1
+    return count
+
+
+def _is_replace_any_section(section) -> bool:
+    affects = getattr(section, "affects", None) or {}
+    return section.variant.lower() == "replace" and str(affects.get("type") or "").lower() == "any"
 
 
 def _has_rule(rules: dict[str, Any] | None, name: str) -> bool:

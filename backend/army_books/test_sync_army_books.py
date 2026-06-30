@@ -158,6 +158,79 @@ BULL_BOOK_DETAIL = {
     ],
 }
 
+RATMEN_WEAPON_TEAMS_BOOK_DETAIL = {
+    "uid": "faction-ratmen",
+    "name": "Ratmen",
+    "versionString": "3.5.3",
+    "units": [
+        {
+            "id": "wXtqtYK",
+            "name": "Weapon Teams",
+            "quality": 5,
+            "defense": 5,
+            "cost": 110,
+            "size": 3,
+            "rules": [{"name": "Tough", "rating": 3}],
+            "weapons": [
+                {
+                    "id": "4DJN0QXy",
+                    "weaponId": "5bdTXzzH",
+                    "name": "Crew",
+                    "count": 3,
+                    "range": 0,
+                    "attacks": 1,
+                    "specialRules": [],
+                },
+                {
+                    "id": "xpLVuWlR",
+                    "weaponId": "ESfMmujC",
+                    "name": "Heavy Drill",
+                    "count": 3,
+                    "range": 0,
+                    "attacks": 1,
+                    "specialRules": [
+                        {"name": "AP", "rating": 4},
+                        {"name": "Deadly", "rating": 3},
+                    ],
+                },
+            ],
+            "upgrades": ["F1"],
+        }
+    ],
+    "upgradePackages": [
+        {
+            "uid": "F1",
+            "sections": [
+                {
+                    "uid": "MwsXsbn",
+                    "label": "Replace any Heavy Drill",
+                    "variant": "replace",
+                    "affects": {"type": "any"},
+                    "targets": ["Heavy Drill"],
+                    "options": [
+                        {
+                            "uid": "VurkaS1",
+                            "costs": [{"cost": 5, "unitId": "wXtqtYK"}],
+                            "label": 'Gatling Gun (18", A4, AP(1))',
+                            "gains": [
+                                {
+                                    "weaponId": "xpLVuWlR",
+                                    "name": "Gatling Gun",
+                                    "count": 1,
+                                    "range": 18,
+                                    "attacks": 4,
+                                    "type": "ArmyBookWeapon",
+                                    "specialRules": [{"name": "AP", "rating": 1}],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+    ],
+}
+
 
 class SyncArmyBooksCommandTests(TestCase):
     @patch("army_books.management.commands.sync_army_books.fetch_army_book")
@@ -246,6 +319,57 @@ class SyncArmyBooksCommandTests(TestCase):
             list(option.weapons.values_list("name", flat=True)),
             ["Twin Arm-Flamethrowers"],
         )
+
+    @patch("army_books.management.commands.sync_army_books.fetch_army_book")
+    @patch("army_books.management.commands.sync_army_books.fetch_army_book_list")
+    def test_sync_preserves_weapon_ids_counts_and_replace_any_metadata(
+        self,
+        mock_fetch_list,
+        mock_fetch_book,
+    ):
+        mock_fetch_list.return_value = [
+            {
+                "uid": "faction-ratmen",
+                "name": "Ratmen",
+                "versionString": "3.5.3",
+            }
+        ]
+        mock_fetch_book.return_value = RATMEN_WEAPON_TEAMS_BOOK_DETAIL
+
+        call_command("sync_army_books")
+
+        unit = Unit.objects.get(source_uid="wXtqtYK")
+        slots = {
+            slot.weapon.name: slot
+            for slot in unit.weapon_slots.select_related("weapon").order_by("weapon__name")
+        }
+        self.assertEqual(set(slots), {"Crew", "Heavy Drill"})
+        self.assertEqual(slots["Heavy Drill"].weapon.source_uid, "ESfMmujC")
+        self.assertEqual(slots["Heavy Drill"].count, 3)
+
+        section = UnitUpgradeSection.objects.get(unit=unit)
+        self.assertEqual(section.affects, {"type": "any"})
+        option = UnitUpgradeOption.objects.get(section=section)
+        option_link = option.option_weapons.select_related("weapon").get()
+        self.assertEqual(option_link.weapon.name, "Gatling Gun")
+        self.assertEqual(option_link.weapon.source_uid, "xpLVuWlR")
+        self.assertEqual(option_link.count, 1)
+
+    @patch("army_books.management.commands.sync_army_books.fetch_army_book")
+    @patch("army_books.management.commands.sync_army_books.fetch_army_book_list")
+    def test_re_sync_removes_stale_weapon_slots(self, mock_fetch_list, mock_fetch_book):
+        mock_fetch_list.return_value = BOOK_LIST
+        mock_fetch_book.return_value = BOOK_DETAIL
+
+        call_command("sync_army_books")
+        updated = {
+            **BOOK_DETAIL,
+            "units": [{**BOOK_DETAIL["units"][0], "weapons": [], "upgrades": []}],
+        }
+        mock_fetch_book.return_value = updated
+        call_command("sync_army_books")
+
+        self.assertEqual(UnitWeaponSlot.objects.count(), 0)
 
     @patch("army_books.management.commands.sync_army_books.fetch_army_book")
     @patch("army_books.management.commands.sync_army_books.fetch_army_book_list")

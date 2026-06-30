@@ -3,8 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-from advisor.llm_service import ListSuggestion, SuggestedUnit
+from advisor.llm_service import ListSuggestion, SelectedUpgradeSelection, SuggestedUnit
 from army_books.models import Faction, Unit, UnitUpgradeOption, UnitWeaponSlot
+from army_books.upgrade_matching import weapon_matches_upgrade_target
+from army_books.upgrade_resolution import resolve_unit_upgrade_options
 from lists.validation import (
     effective_max_models,
     force_org_copy_limit,
@@ -82,12 +84,19 @@ def reconcile_suggestion(
             suggested.combined_from_count,
         )
         warnings.extend(combined_warnings)
-        selected_upgrade_ids, upgrade_warnings = _reconcile_selected_upgrades(
+        selected_upgrade_ids, selected_upgrade_selections, upgrade_warnings = _reconcile_selected_upgrades(
             unit,
             suggested.selected_upgrade_ids,
+            suggested.selected_upgrade_selections,
         )
         warnings.extend(upgrade_warnings)
-        unit_points = _unit_points(unit, model_count, selected_upgrade_ids, combined_from_count)
+        unit_points = _unit_points(
+            unit,
+            model_count,
+            selected_upgrade_ids,
+            combined_from_count,
+            selected_upgrade_selections,
+        )
         if group_point_cap is not None and unit_points > group_point_cap:
             warnings.append(
                 f"{unit.name} was skipped because it exceeds the 35% force organization unit cap."
@@ -125,6 +134,7 @@ def reconcile_suggestion(
                 "model_count": model_count,
                 "combined_from_count": combined_from_count,
                 "selected_upgrade_ids": selected_upgrade_ids,
+                "selected_upgrade_selections": selected_upgrade_selections,
                 "parent_unit_index": suggested.parent_unit_index,
             }
         )
@@ -194,10 +204,12 @@ def _unit_points(
     model_count: int,
     selected_upgrade_ids: list[int] | None = None,
     combined_from_count: int = 1,
+    selected_upgrade_selections: list | None = None,
 ) -> int:
     slot = _default_slot(list(unit.weapon_slots.all()))
-    upgrade_options = _upgrade_options_by_id(unit, selected_upgrade_ids or [])
-    upgrade_cost = sum(option.cost for option in upgrade_options)
+    upgrade_options = _resolved_upgrade_options_by_id(unit, selected_upgrade_ids or [])
+    quantities = _quantity_by_option(selected_upgrade_selections)
+    upgrade_cost = sum(option.cost * quantities.get(option.id, 1) for option in upgrade_options)
     if not upgrade_options and slot:
         upgrade_cost = slot.upgrade_cost
     return unit_selection_points(
@@ -208,25 +220,55 @@ def _unit_points(
     )
 
 
-def _reconcile_selected_upgrades(unit: Unit, option_ids: list[int]) -> tuple[list[int], list[str]]:
+def _reconcile_selected_upgrades(
+    unit: Unit,
+    option_ids: list[int],
+    selected_upgrade_selections: list | None = None,
+) -> tuple[list[int], list[SelectedUpgradeSelection], list[str]]:
     if not option_ids:
-        return [], []
+        return [], [], []
 
     warnings: list[str] = []
     selected_ids: list[int] = []
     seen_sections: set[int] = set()
+    requested_quantities = _quantity_by_option(selected_upgrade_selections)
     option_lookup = {option.id: option for option in _upgrade_options_by_id(unit, option_ids)}
     for option_id in option_ids:
         option = option_lookup.get(option_id)
         if option is None:
             warnings.append(f"{unit.name} ignored invalid upgrade id {option_id}.")
             continue
-        if option.section_id in seen_sections:
+        if option.section_id in seen_sections and not _is_replace_any_option(option):
             warnings.append(f"{unit.name} ignored {option.label}; only one upgrade per section is allowed.")
             continue
         seen_sections.add(option.section_id)
         selected_ids.append(option.id)
-    return selected_ids, warnings
+    selected_options = _upgrade_options_by_id(unit, selected_ids)
+    resolution = resolve_unit_upgrade_options(
+        unit,
+        selected_options,
+        warn_on_added_prerequisites=True,
+    )
+    if not resolution.is_valid:
+        warnings.extend(f"{unit.name} ignored invalid upgrade selection: {error}" for error in resolution.errors)
+        return [], [], warnings
+    warnings.extend(resolution.warnings)
+    reconciled_selections: list[SelectedUpgradeSelection] = []
+    for option in resolution.options:
+        quantity = requested_quantities.get(option.id, 1)
+        if _is_replace_any_option(option):
+            available = _replace_any_target_count(unit, option.section)
+            if quantity > available:
+                warnings.append(
+                    f"{unit.name} reduced {option.label} quantity to {available}; only {available} matching weapons are available."
+                )
+                quantity = available
+        elif quantity > 1:
+            warnings.append(f"{unit.name} reduced {option.label} quantity to 1; it is not a variable replacement upgrade.")
+            quantity = 1
+        if quantity > 0:
+            reconciled_selections.append(SelectedUpgradeSelection(option=option.id, quantity=max(1, quantity)))
+    return resolution.option_ids, reconciled_selections, warnings
 
 
 def _upgrade_options_by_id(unit: Unit, option_ids: list[int]) -> list[UnitUpgradeOption]:
@@ -238,6 +280,40 @@ def _upgrade_options_by_id(unit: Unit, option_ids: list[int]) -> list[UnitUpgrad
         options.extend(option for option in section.options.all() if option.id in wanted)
     option_order = {option_id: index for index, option_id in enumerate(option_ids)}
     return sorted(options, key=lambda option: option_order[option.id])
+
+
+def _resolved_upgrade_options_by_id(unit: Unit, option_ids: list[int]) -> list[UnitUpgradeOption]:
+    selected_options = _upgrade_options_by_id(unit, option_ids)
+    resolution = resolve_unit_upgrade_options(unit, selected_options)
+    return resolution.options if resolution.is_valid else selected_options
+
+
+def _quantity_by_option(selections: list | None) -> dict[int, int]:
+    quantities: dict[int, int] = {}
+    for selection in selections or []:
+        if hasattr(selection, "option"):
+            option_id = getattr(selection, "option")
+            quantity = getattr(selection, "quantity", 1)
+        else:
+            option_id = selection.get("option") if isinstance(selection, dict) else None
+            quantity = selection.get("quantity", 1) if isinstance(selection, dict) else 1
+        if option_id is None:
+            continue
+        quantities[int(option_id)] = max(1, int(quantity))
+    return quantities
+
+
+def _is_replace_any_option(option: UnitUpgradeOption) -> bool:
+    affects = option.section.affects or {}
+    return option.section.variant.lower() == "replace" and str(affects.get("type") or "").lower() == "any"
+
+
+def _replace_any_target_count(unit: Unit, section) -> int:
+    count = 0
+    for slot in unit.weapon_slots.all():
+        if slot.is_default and weapon_matches_upgrade_target(slot.weapon.name, section.targets):
+            count += slot.count or 1
+    return count
 
 
 def _default_slot(slots: list[UnitWeaponSlot]) -> UnitWeaponSlot | None:
@@ -637,15 +713,24 @@ def _apply_repair_action(
         return [
             suggested
             if index != action.upgrade_index
-            else suggested.model_copy(update={"selected_upgrade_ids": action.selected_upgrade_ids or []})
+            else suggested.model_copy(
+                update={
+                    "selected_upgrade_ids": action.selected_upgrade_ids or [],
+                    "selected_upgrade_selections": [
+                        SelectedUpgradeSelection(option=option_id, quantity=1)
+                        for option_id in action.selected_upgrade_ids or []
+                    ],
+                }
+            )
             for index, suggested in enumerate(reconciled_units)
         ]
     return reconciled_units
 
 
 def _upgrade_repair_candidates(unit: Unit, selected_upgrade_ids: list[int]) -> list[list[int]]:
-    selected_options = _upgrade_options_by_id(unit, selected_upgrade_ids)
+    selected_options = _resolved_upgrade_options_by_id(unit, selected_upgrade_ids)
     selected_sections = {option.section_id for option in selected_options}
+    selected_ids = [option.id for option in selected_options]
     candidates: list[list[int]] = []
     for section in unit.upgrade_sections.all():
         if section.id in selected_sections:
@@ -653,7 +738,10 @@ def _upgrade_repair_candidates(unit: Unit, selected_upgrade_ids: list[int]) -> l
         for option in section.options.all():
             if option.cost <= 0:
                 continue
-            candidates.append([*selected_upgrade_ids, option.id])
+            resolution = resolve_unit_upgrade_options(unit, [*selected_options, option])
+            if not resolution.is_valid or resolution.option_ids == selected_ids:
+                continue
+            candidates.append(resolution.option_ids)
     return candidates
 
 

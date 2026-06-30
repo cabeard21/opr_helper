@@ -57,6 +57,7 @@ def build_system_prompt(game: str = "AoF") -> str:
         "Respect AP and Deadly needs; include credible AP threats for tough targets. "
         "Units cannot shoot and charge in the same activation; treat package Act_* damage as the usable damage mode, "
         "and do not justify hybrid units by adding ranged and melee damage together. "
+        "Limited weapons are once per game; Act_* and W100 already use sustained value, while Burst_* is only the one-use spike. "
         "Ranged attacks on melee-first units are mainly flexibility unless the package is tagged ranged-pressure or hybrid-flex; "
         "be cautious with packages tagged ranged-tax-risk. "
         "Fearless is useful for units that need to maintain morale, keep activating, and contest objectives after taking losses. "

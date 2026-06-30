@@ -178,6 +178,24 @@ def test_parse_weapon_maps_current_army_forge_weapon_shape():
     }
 
 
+def test_parse_weapon_keeps_limited_special_rule():
+    raw_weapon = {
+        "id": "weapon-grenade",
+        "name": "Grenade",
+        "range": 12,
+        "attacks": 4,
+        "specialRules": [
+            {"name": "AP", "rating": 1, "label": "AP(1)"},
+            {"name": "Limited", "label": "Limited"},
+        ],
+    }
+
+    parsed = parse_weapon(raw_weapon)
+
+    assert parsed["ap"] == 1
+    assert parsed["special_rules"] == {"Limited": True}
+
+
 def test_parse_spell_maps_army_forge_spell_shape():
     raw_spell = {
         "id": "spell-poison-mist",

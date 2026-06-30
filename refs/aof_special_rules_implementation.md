@@ -41,7 +41,7 @@ Primary implementation seams:
 | Immobile | None | No Hold-only restriction. |
 | Impact(X) | Partial | Charge impact dice are modeled as AP0 hits when combat context is charging; fatigue and full movement/charge flow are not modeled. |
 | Indirect | Partial | Calc UI can apply a -1 hit modifier; no LOS/cover/after-moving context. |
-| Limited | None | No once-per-game tracking. |
+| Limited | Partial | Weapon-scoped Limited attacks are discounted to one quarter of their burst EV for sustained 4-round list/advisor scoring, with full one-use burst EV surfaced in list analysis and advisor package context. No per-game spent-state tracking. |
 | Melee Slayer | Partial | Charging melee attacks get AP(+2) against Tough(3)+ targets in calculator, list analysis, and advisor scoring; no full charge/matchup simulator. |
 | Regeneration | High | Defender-side wound ignore modeled as `2/3` wound multiplier; durability scoring uses `1.5`; Bane/Rending bypass handled. |
 | Relentless | Partial | Extra hit on unmodified shooting 6s is modeled when combat context marks the target as over 9"; full range/line-of-sight flow is not modeled. |
@@ -63,4 +63,4 @@ Summary:
 - Strongest modeled rules: AP, Blast, Deadly, Disintegrate, Regeneration, Reliable, Rending, Surge, Tough.
 - Partially modeled combat rules: Bane, Furious, Impact, Indirect, Melee Slayer, Relentless, Sergeant, Stealth, Thrust, Unstoppable.
 - Strategic/advisor signals: Ambush, Fast, Fearless, Flying, Scout, Strider, plus support tagging for Regeneration and Stealth.
-- Mostly absent categories: movement/deployment simulation, morale, full spell resolution, terrain interaction, once-per-game tracking, individual model targeting, and charge-only context.
+- Mostly absent categories: movement/deployment simulation, morale, full spell resolution, terrain interaction, per-game spent-state tracking, individual model targeting, and charge-only context.

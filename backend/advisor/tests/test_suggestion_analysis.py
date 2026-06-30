@@ -67,6 +67,33 @@ class SuggestionAnalysisTests(TestCase):
         self.assertEqual(analysis.largest_group_share, 0.35)
 
     def test_balanced_list_produces_no_metrics_feedback(self):
+        scouts = self._unit("Scouts", 150, special_rules={"Scout": True}, weapon_attacks=10, weapon_ap=2)
+        flyers = self._unit("Flyers", 150, special_rules={"Flying": True}, weapon_attacks=10, weapon_ap=2)
+        archers = self._unit("Archers", 150, weapon_range=24, weapon_attacks=10, weapon_ap=2)
+        slayers = self._unit("Slayers", 150, weapon_attacks=10, weapon_ap=3)
+        spears = self._unit("Spears", 150, weapon_attacks=10, weapon_ap=2)
+        suggestion = self._suggestion(
+            SuggestedUnit(unit_id=scouts.id, unit_name=scouts.name, model_count=1, justification="Scout."),
+            SuggestedUnit(unit_id=flyers.id, unit_name=flyers.name, model_count=1, justification="Fly."),
+            SuggestedUnit(unit_id=archers.id, unit_name=archers.name, model_count=1, justification="Shoot."),
+            SuggestedUnit(unit_id=slayers.id, unit_name=slayers.name, model_count=1, justification="AP."),
+            SuggestedUnit(unit_id=spears.id, unit_name=spears.name, model_count=1, justification="Score."),
+        )
+        reconciled = reconcile_suggestion(
+            faction=self.faction,
+            point_limit=750,
+            suggestion=suggestion,
+        )
+
+        analysis = analyze_reconciled_suggestion(
+            faction=self.faction,
+            point_limit=750,
+            reconciled=reconciled,
+        )
+
+        self.assertEqual(build_metrics_correction_feedback(analysis), "")
+
+    def test_low_damage_output_produces_bounded_feedback(self):
         scouts = self._unit("Scouts", 150, special_rules={"Scout": True})
         flyers = self._unit("Flyers", 150, special_rules={"Flying": True})
         archers = self._unit("Archers", 150, weapon_range=24)
@@ -90,8 +117,80 @@ class SuggestionAnalysisTests(TestCase):
             point_limit=750,
             reconciled=reconciled,
         )
+        feedback = build_metrics_correction_feedback(analysis)
 
-        self.assertEqual(build_metrics_correction_feedback(analysis), "")
+        self.assertLess(analysis.damage_output_score, 45)
+        self.assertIn("Improve total damage output", feedback)
+        self.assertIn("Current totals:", feedback)
+        self.assertIn("expected around 25.00 / 12.00 / 8.00 at 750 pts", feedback)
+
+    def test_damage_output_benchmarks_scale_by_point_limit(self):
+        hitters = [
+            self._unit(f"Hitter {index}", 300, weapon_attacks=10, weapon_ap=2)
+            for index in range(1, 6)
+        ]
+        suggestion = self._suggestion(
+            *[
+                SuggestedUnit(unit_id=unit.id, unit_name=unit.name, model_count=1, justification="Damage.")
+                for unit in hitters
+            ]
+        )
+        reconciled = reconcile_suggestion(
+            faction=self.faction,
+            point_limit=1500,
+            suggestion=suggestion,
+        )
+
+        analysis = analyze_reconciled_suggestion(
+            faction=self.faction,
+            point_limit=1500,
+            reconciled=reconciled,
+        )
+
+        self.assertEqual(analysis.damage_output_benchmarks["infantry"], 50)
+        self.assertEqual(analysis.damage_output_benchmarks["elite"], 24)
+        self.assertEqual(analysis.damage_output_benchmarks["monster"], 16)
+
+    def test_selected_damage_upgrades_contribute_to_damage_output(self):
+        unit = self._unit("Spears", 200, weapon_attacks=1)
+        upgrade_weapon = Weapon.objects.create(
+            name="Heavy Spear",
+            range=0,
+            attacks=20,
+            attacks_string="A20",
+            ap=3,
+        )
+        option = unit.upgrade_sections.create(
+            section_uid="spears-weapons",
+            label="Weapons",
+        ).options.create(
+            option_uid="heavy-spears",
+            label="Heavy Spears",
+            cost=0,
+        )
+        option.weapons.add(upgrade_weapon)
+        suggestion = self._suggestion(
+            SuggestedUnit(
+                unit_id=unit.id,
+                unit_name=unit.name,
+                model_count=1,
+                selected_upgrade_ids=[option.id],
+                justification="Upgrade damage.",
+            )
+        )
+        reconciled = reconcile_suggestion(
+            faction=self.faction,
+            point_limit=750,
+            suggestion=suggestion,
+        )
+
+        analysis = analyze_reconciled_suggestion(
+            faction=self.faction,
+            point_limit=750,
+            reconciled=reconciled,
+        )
+
+        self.assertGreater(analysis.target_ev["infantry"], 1)
 
     def _suggestion(self, *units: SuggestedUnit) -> ListSuggestion:
         return ListSuggestion(
@@ -112,6 +211,7 @@ class SuggestionAnalysisTests(TestCase):
         special_rules=None,
         weapon_range: int = 0,
         weapon_ap: int = 0,
+        weapon_attacks: int = 2,
         min_models: int = 1,
         default_models: int = 1,
     ) -> Unit:
@@ -130,8 +230,8 @@ class SuggestionAnalysisTests(TestCase):
         weapon = Weapon.objects.create(
             name=f"{name} Weapon",
             range=weapon_range,
-            attacks=2,
-            attacks_string="A2",
+            attacks=weapon_attacks,
+            attacks_string=f"A{weapon_attacks}",
             ap=weapon_ap,
         )
         UnitWeaponSlot.objects.create(unit=unit, weapon=weapon, is_default=True)

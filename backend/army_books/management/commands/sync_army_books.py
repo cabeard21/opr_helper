@@ -83,21 +83,25 @@ def _sync_book(book: dict[str, Any], fallback: dict[str, Any]) -> dict[str, int]
         unit = _upsert_unit(faction, unit_kwargs)
         summary["units"] += 1
 
-        for raw_weapon, is_default, upgrade_cost, option_id, upgrade_id in _weapon_options(raw_unit):
+        seen_slot_ids: set[int] = set()
+        for raw_weapon, is_default, upgrade_cost, option_id, upgrade_id, count in _weapon_options(raw_unit):
             weapon_kwargs = parse_weapon(raw_weapon)
             weapon = _upsert_weapon(weapon_kwargs)
-            UnitWeaponSlot.objects.update_or_create(
+            slot, _created = UnitWeaponSlot.objects.update_or_create(
                 unit=unit,
                 weapon=weapon,
                 defaults={
                     "is_default": is_default,
+                    "count": count,
                     "upgrade_cost": upgrade_cost,
                     "option_id": option_id,
                     "upgrade_id": upgrade_id,
                 },
             )
+            seen_slot_ids.add(slot.id)
             summary["weapons"] += 1
             summary["slots"] += 1
+        unit.weapon_slots.exclude(id__in=seen_slot_ids).delete()
         _sync_unit_upgrades(unit, raw_unit, upgrade_packages)
 
     return summary
@@ -172,6 +176,7 @@ def _sync_unit_upgrades(
                     "label": str(raw_section.get("label") or ""),
                     "variant": str(raw_section.get("variant") or ""),
                     "targets": _upgrade_targets(raw_section),
+                    "affects": raw_section.get("affects") if isinstance(raw_section.get("affects"), dict) else {},
                 },
             )
             _sync_upgrade_options(section, raw_section, unit)
@@ -207,7 +212,11 @@ def _sync_option_weapons(option: UnitUpgradeOption, raw_option: dict[str, Any]) 
     seen_weapon_ids: set[int] = set()
     for raw_weapon in _gained_weapons(raw_option):
         weapon = _upsert_weapon(parse_weapon(raw_weapon))
-        UnitUpgradeOptionWeapon.objects.update_or_create(option=option, weapon=weapon)
+        UnitUpgradeOptionWeapon.objects.update_or_create(
+            option=option,
+            weapon=weapon,
+            defaults={"count": _weapon_count(raw_weapon)},
+        )
         seen_weapon_ids.add(weapon.id)
     option.option_weapons.exclude(weapon_id__in=seen_weapon_ids).delete()
 
@@ -229,8 +238,8 @@ def _weapons(unit: dict[str, Any]) -> list[dict[str, Any]]:
     return unit.get("weapons") or unit.get("loadout") or []
 
 
-def _weapon_options(unit: dict[str, Any]) -> list[tuple[dict[str, Any], bool, int, str | None, str | None]]:
-    options = [(weapon, True, 0, None, None) for weapon in _weapons(unit)]
+def _weapon_options(unit: dict[str, Any]) -> list[tuple[dict[str, Any], bool, int, str | None, str | None, int | None]]:
+    options = [(weapon, True, 0, None, None, _weapon_count(weapon)) for weapon in _weapons(unit)]
     for upgrade in _upgrades(unit):
         upgrade_cost = _upgrade_cost(upgrade)
         option_id = _upgrade_option_id(upgrade)
@@ -242,6 +251,7 @@ def _weapon_options(unit: dict[str, Any]) -> list[tuple[dict[str, Any], bool, in
                     upgrade_cost,
                     option_id,
                     _upgrade_id(upgrade, weapon),
+                    _weapon_count(weapon),
                 )
             )
     return options
@@ -361,6 +371,14 @@ def _safe_int(value: Any) -> int:
         return int(value)
     except (TypeError, ValueError):
         return 0
+
+
+def _weapon_count(weapon: dict[str, Any]) -> int | None:
+    value = weapon.get("count")
+    if value is None:
+        value = weapon.get("originalCount")
+    count = _safe_int(value)
+    return count if count > 0 else None
 
 
 def _upgrade_option_id(upgrade: dict[str, Any]) -> str | None:

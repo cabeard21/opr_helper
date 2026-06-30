@@ -4,7 +4,7 @@ from unittest.mock import call
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
-from advisor.llm_service import AdvisorLLMError, ListSuggestion, SuggestedUnit
+from advisor.llm_service import AdvisorLLMError, ListSuggestion, SelectedUpgradeSelection, SuggestedUnit
 from army_books.models import Faction, Unit, UnitUpgradeOption, UnitUpgradeSection, UnitWeaponSlot, Weapon
 from lists.models import ArmyList, ListUnit, ListUnitUpgrade
 
@@ -362,6 +362,49 @@ class AdvisorApiTests(TestCase):
         self.assertEqual(ListUnitUpgrade.objects.get().option, self.upgrade_option)
 
     @patch("advisor.views.suggest_list")
+    def test_suggest_endpoint_persists_selected_upgrade_quantities(self, suggest_list):
+        self.slot.count = 3
+        self.slot.is_default = True
+        self.slot.save(update_fields=["count", "is_default"])
+        self.upgrade_section.variant = "replace"
+        self.upgrade_section.targets = ["Great Weapon"]
+        self.upgrade_section.affects = {"type": "any"}
+        self.upgrade_section.save(update_fields=["variant", "targets", "affects"])
+        suggestion = self.suggestion.model_copy(
+            update={
+                "units": [
+                    self.suggestion.units[0].model_copy(
+                        update={
+                            "selected_upgrade_ids": [self.upgrade_option.id],
+                            "selected_upgrade_selections": [
+                                SelectedUpgradeSelection(option=self.upgrade_option.id, quantity=3),
+                            ],
+                        }
+                    )
+                ],
+            }
+        )
+
+        response = self.client.post(
+            "/api/advisor/suggest/",
+            {
+                "faction": self.faction.id,
+                "point_limit": 2000,
+                "prompt": "Aggressive elite list.",
+                "dry_run": False,
+                "suggestion": suggestion.model_dump(),
+            },
+            format="json",
+        )
+
+        payload = response.json()
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(payload["data"]["computed_total_points"], 240)
+        selected = ListUnitUpgrade.objects.get()
+        self.assertEqual(selected.option, self.upgrade_option)
+        self.assertEqual(selected.quantity, 3)
+
+    @patch("advisor.views.suggest_list")
     def test_suggest_endpoint_creates_repaired_underfilled_preview_payload(self, suggest_list):
         guard = self._unit_with_default_weapon("Guardians", 90)
         scouts = self._unit_with_default_weapon("Scouts", 120, {"Scout": True})
@@ -629,6 +672,75 @@ class AdvisorApiTests(TestCase):
         self.assertIn("mobility packages 0", feedback)
         self.assertEqual(payload["data"]["suggestion"]["archetype"], "Objective Control")
 
+    @patch("advisor.views.suggest_list")
+    def test_suggest_endpoint_prefers_retry_with_better_damage_output(self, suggest_list):
+        first_units = [
+            self._unit_with_default_weapon("Scouts", 150, {"Scout": True}),
+            self._unit_with_default_weapon("Flyers", 150, {"Flying": True}),
+            self._unit_with_default_weapon("Archers", 150, weapon_range=24),
+            self._unit_with_default_weapon("Slayers", 150, weapon_ap=3),
+            self._unit_with_default_weapon("Spears", 150),
+        ]
+        corrected_units = [
+            self._unit_with_default_weapon("Heavy Scouts", 150, {"Scout": True}, weapon_attacks=10, weapon_ap=2),
+            self._unit_with_default_weapon("Heavy Flyers", 150, {"Flying": True}, weapon_attacks=10, weapon_ap=2),
+            self._unit_with_default_weapon("Heavy Archers", 150, weapon_range=24, weapon_attacks=10, weapon_ap=2),
+            self._unit_with_default_weapon("Heavy Slayers", 150, weapon_attacks=10, weapon_ap=3),
+            self._unit_with_default_weapon("Heavy Spears", 150, weapon_attacks=10, weapon_ap=2),
+        ]
+        first = ListSuggestion(
+            units=[
+                SuggestedUnit(
+                    unit_id=unit.id,
+                    unit_name=unit.name,
+                    model_count=1,
+                    justification="Covers a role.",
+                )
+                for unit in first_units
+            ],
+            total_points=750,
+            archetype="Mobile Anvil",
+            playstyle="Objective control",
+            activation_count=5,
+            strategy_summary="Contest objectives with mobile units.",
+            warnings=[],
+        )
+        corrected = ListSuggestion(
+            units=[
+                SuggestedUnit(
+                    unit_id=unit.id,
+                    unit_name=unit.name,
+                    model_count=1,
+                    justification="Adds real output while preserving roles.",
+                )
+                for unit in corrected_units
+            ],
+            total_points=750,
+            archetype="Mobile Anvil",
+            playstyle="Objective control",
+            activation_count=5,
+            strategy_summary="Contest objectives with enough damage to clear markers.",
+            warnings=[],
+        )
+        suggest_list.side_effect = [first, corrected]
+
+        response = self.client.post(
+            "/api/advisor/suggest/",
+            {
+                "faction": self.faction.id,
+                "point_limit": 750,
+                "prompt": "Make a mobile objective list.",
+            },
+            format="json",
+        )
+
+        payload = response.json()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(suggest_list.call_count, 2)
+        feedback = suggest_list.call_args.kwargs["correction_feedback"]
+        self.assertIn("Improve total damage output", feedback)
+        self.assertEqual(payload["data"]["suggestion"]["units"][0]["unit_name"], "Heavy Scouts")
+
     @override_settings(ADVISOR_RATE_LIMIT_REQUESTS=5, ADVISOR_RATE_LIMIT_WINDOW_SECONDS=60)
     @patch("advisor.views.suggest_list")
     def test_suggest_endpoint_rate_limits_expensive_requests(self, suggest_list):
@@ -660,7 +772,15 @@ class AdvisorApiTests(TestCase):
         self.assertEqual(response.status_code, 429)
         self.assertIn("Too many advisor requests", response.json()["error"])
 
-    def _unit_with_default_weapon(self, name, points, special_rules=None, weapon_range=None, weapon_ap=None):
+    def _unit_with_default_weapon(
+        self,
+        name,
+        points,
+        special_rules=None,
+        weapon_range=None,
+        weapon_ap=None,
+        weapon_attacks=None,
+    ):
         unit = Unit.objects.create(
             faction=self.faction,
             name=name,
@@ -674,12 +794,12 @@ class AdvisorApiTests(TestCase):
             special_rules=special_rules or {},
         )
         weapon = self.weapon
-        if weapon_range is not None or weapon_ap is not None:
+        if weapon_range is not None or weapon_ap is not None or weapon_attacks is not None:
             weapon = Weapon.objects.create(
                 name=f"{name} Weapon",
                 range=self.weapon.range if weapon_range is None else weapon_range,
-                attacks=self.weapon.attacks,
-                attacks_string=self.weapon.attacks_string,
+                attacks=self.weapon.attacks if weapon_attacks is None else weapon_attacks,
+                attacks_string=self.weapon.attacks_string if weapon_attacks is None else f"A{weapon_attacks}",
                 ap=self.weapon.ap if weapon_ap is None else weapon_ap,
             )
         UnitWeaponSlot.objects.create(unit=unit, weapon=weapon, is_default=True)
